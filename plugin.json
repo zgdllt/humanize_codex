@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "humanfia-humanize",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Task-shaped Humanize Python workflows for Codex and DSH, with independent status and a curated flow library.",
   "license": "Apache-2.0",
   "extensions": {

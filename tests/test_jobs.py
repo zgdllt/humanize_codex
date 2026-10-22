@@ -1,5 +1,6 @@
 """Validate job boundaries, single-writer ownership and honest lifecycle reporting."""
 
+import json
 import time
 from unittest.mock import patch
 
@@ -143,3 +144,37 @@ def test_completed_job_cannot_be_resumed(tmp_path):
     atomic_json(path, {**read_json(path), "status": "complete"})
     with pytest.raises(ValueError, match="unfinished"):
         jobs.resume(state["job_id"])
+
+
+def test_trace_projection_drops_model_text_and_pairs_session_spans(tmp_path):
+    jobs = Jobs(tmp_path / "data")
+    with patch("humanize_codex.jobs.subprocess.Popen"):
+        state = jobs.start(prepare(str(tmp_path), "Task"))
+    path = tmp_path / "data/runs" / state["job_id"]
+    lines = [
+        {"at": 1.0, "kind": "session_opened", "role": "actor", "session": "s1"},
+        {"at": 2.0, "kind": "begins", "role": "actor", "session": "s1", "text": "PRIVATE_OUTPUT"},
+        {"at": 3.0, "kind": "notice", "text": "PRIVATE_NOTICE"},
+        {"at": 4.5, "kind": "ends", "role": "actor", "session": "s1", "text": "PRIVATE_OUTPUT"},
+        {"at": 5.0, "kind": "begins", "role": "reviewer", "session": "s2"},
+    ]
+    (path / "events.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in lines), encoding="utf-8"
+    )
+    trace = jobs.status(state["job_id"], include_trace=True)["trace"]
+    spans = {s["role"]: s for s in trace["spans"]}
+    assert spans["actor"]["start"] == 2.0
+    assert spans["actor"]["end"] == 4.5
+    assert spans["reviewer"]["end"] is None
+    assert [f["kind"] for f in trace["facts"]] == ["session_opened"]
+    assert "PRIVATE" not in json.dumps(trace)
+    assert "s1" not in json.dumps(trace)
+
+
+def test_normal_status_does_not_scan_transcripts_for_dashboard_trace(tmp_path):
+    jobs = Jobs(tmp_path / "data")
+    with patch("humanize_codex.jobs.subprocess.Popen"):
+        state = jobs.start(prepare(str(tmp_path), "Task"))
+    with patch.object(Jobs, "trace", side_effect=AssertionError("unrequested trace scan")):
+        assert "trace" not in jobs.status(state["job_id"])
+        assert len(jobs.list(limit=1)) == 1

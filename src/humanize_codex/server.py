@@ -44,10 +44,13 @@ def humanize_catalog() -> dict[str, Any]:
         "flow_library": "Reviewed successes enter the candidate pool; curated reuse requires "
         "applicability assessment and at least two passing structural test cases",
         "live_status": "A flow-owned observer narrates the dashboard; runtime records the facts",
+        "custom_verification": "Unfinished custom output ends as needs_work. Choose a new bounded "
+        "run from the evidence; resume is supported only when the authored flow declares it",
         "defaults": {"max_rounds": 6, "duration_seconds": 1800, "output_tokens": 50000},
         "statuses": [
             "starting",
             "running",
+            "cleaning_up",
             "complete",
             "blocked",
             "round_limit",
@@ -86,6 +89,8 @@ def humanize_run(
     Without entrypoint, use the builtin adaptive four-role template. With flow_file and
     entrypoint, run an authored Python flow with its own roles, parameters and control
     structure; independent verification and status agents are added by the manager.
+    A custom flow that fails verification ends as needs_work; choose the next bounded run
+    from its evidence. Resume requires an explicitly resumable authored flow.
     Completed reviewed flows enter the local candidate pool; success alone is not curation.
     Monitor the returned job_id; launching is not proof of completion.
     """

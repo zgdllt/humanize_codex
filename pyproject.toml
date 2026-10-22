@@ -1,6 +1,6 @@
 [project]
 name = "humanfia-humanize-codex"
-version = "0.3.0"
+version = "0.3.1"
 description = "Humanfia Humanize dynamic workflows for Codex"
 requires-python = ">=3.12"
 license = "Apache-2.0"

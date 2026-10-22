@@ -171,7 +171,7 @@ class Jobs:
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or data_root()).resolve()
 
-    def status(self, job_id: str) -> dict[str, Any]:
+    def status(self, job_id: str, *, include_trace: bool = False) -> dict[str, Any]:
         path = job_path(self.root, job_id)
         state = read_json(path / "state.json")
         if state["status"] not in TERMINAL and time.time() - state["heartbeat"] > 60:
@@ -195,17 +195,34 @@ class Jobs:
             "remaining_seconds": round(max(0, request["budget"]["duration"] - elapsed), 1),
             "revision": f"{state['status']}:{progress.get('revision', 0)}",
             "artifacts": str(path),
+            **({"trace": self.trace(job_id, state)} if include_trace else {}),
             "request": request,
         }
 
-    def list(self, workspace: str | None = None) -> list[dict[str, Any]]:
+    def trace(self, job_id: str, state: dict | None = None) -> dict:
+        from .trace import read_trace
+
+        path = job_path(self.root, job_id)
+        return read_trace(path, state if state is not None else read_json(path / "state.json"))
+
+    def list(
+        self,
+        workspace: str | None = None,
+        *,
+        limit: int | None = None,
+        include_trace: bool = False,
+    ) -> list[dict[str, Any]]:
         selected = str(Path(workspace).expanduser().resolve()) if workspace else None
-        states = []
-        for file in sorted((self.root / "runs").glob("*/request.json"), reverse=True):
-            state = self.status(file.parent.name)
-            if selected is None or state["request"]["workspace"] == selected:
-                states.append(state)
-        return sorted(states, key=lambda s: s["created"], reverse=True)
+        records = []
+        for file in (self.root / "runs").glob("*/request.json"):
+            if selected is not None and read_json(file)["workspace"] != selected:
+                continue
+            state = read_json(file.with_name("state.json"))
+            records.append((state["created"], file.parent.name))
+        records.sort(reverse=True)
+        if limit is not None:
+            records = records[:limit]
+        return [self.status(job_id, include_trace=include_trace) for _, job_id in records]
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         if os.environ.get("HUMANIZE_CODEX_CHILD") == "1":
@@ -265,18 +282,20 @@ class Jobs:
         if kind not in {"cancel", "steer"}:
             raise ValueError("Unknown control action")
         path = job_path(self.root, job_id)
-        state = self.status(job_id)
-        if state["status"] in TERMINAL:
-            raise ValueError(f"Job is already {state['status']}")
         if kind == "steer" and (not text.strip() or len(text) > 50000):
             raise ValueError("Steering text must contain 1–50000 characters")
-        if role and (
-            role not in state.get("agents", {})
-            or role in {"observer", "humanize_observer", "humanize_verifier"}
-        ):
-            raise ValueError("Select an active custom task role, not a manager/observer role")
         ticket = uuid.uuid4().hex
         with locked(self.root):
+            state = self.status(job_id)
+            if state["status"] in TERMINAL:
+                raise ValueError(f"Job is already {state['status']}")
+            if kind == "steer" and state["status"] == "cleaning_up":
+                raise ValueError("Job is cleaning up; steering can no longer reach its agents")
+            if role and (
+                role not in state.get("agents", {})
+                or role in {"observer", "humanize_observer", "humanize_verifier"}
+            ):
+                raise ValueError("Select an active custom task role, not a manager/observer role")
             atomic_json(
                 path / "inbox" / f"{time.time_ns()}-{ticket}.json",
                 {

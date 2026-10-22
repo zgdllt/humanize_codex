@@ -15,6 +15,20 @@ RESERVED = ("humanize_verifier", "humanize_observer")
 RESERVED_ENV = "humanize_workspace"
 
 
+def _declares_name(node: ast.AST, name: str) -> bool:
+    """Match an `@flow(name=...)` decorator so a renamed entry still resolves."""
+    return any(
+        isinstance(decorator, ast.Call)
+        and any(
+            keyword.arg == "name"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value == name
+            for keyword in decorator.keywords
+        )
+        for decorator in getattr(node, "decorator_list", [])
+    )
+
+
 def inspect_flow(source: str, entrypoint: str, workspace: str) -> dict:
     """Inspect a fresh frozen module in a bounded process, never in the MCP process."""
     import os
@@ -63,20 +77,9 @@ def _inspect_flow(source: str, entrypoint: str, workspace: str) -> dict:
     }
     selected = functions.get(entrypoint)
     if selected is None:
-        selected = next(
-            n
-            for n in functions.values()
-            if any(
-                isinstance(d, ast.Call)
-                and any(
-                    k.arg == "name"
-                    and isinstance(k.value, ast.Constant)
-                    and k.value.value == entrypoint
-                    for k in d.keywords
-                )
-                for d in n.decorator_list
-            )
-        )
+        selected = next((n for n in functions.values() if _declares_name(n, entrypoint)), None)
+    if selected is None:
+        raise ValueError(f"No flow function declares the entrypoint {entrypoint!r}")
     reached, pending, seen = [], [selected], set()
     while pending:
         function = pending.pop()
@@ -244,7 +247,7 @@ def validate_flow(root: Path, source: str, entrypoint: str, cases: list[dict]) -
             [sys.executable, "-m", "humanize_codex.cli", "validate-worker", str(path)],
             env={**os.environ, "HUMANIZE_CODEX_CHILD": "1"},
             cwd=path,
-            timeout=55,
+            timeout=10 * len(cases) + 5,
         )
         receipt = read_json(path / "receipt.json")
     except (subprocess.SubprocessError, OSError) as error:

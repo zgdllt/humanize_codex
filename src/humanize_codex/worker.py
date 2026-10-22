@@ -14,9 +14,9 @@ from typing import Any
 from .binary import select_codex
 from .compat import guard_codex_startup
 from .jobs import ROLES
-from .library import Library
+from .library import retain_completed
 from .models import default_agent
-from .store import atomic_json, data_root, job_path, read_json, workspace_locked
+from .store import TERMINAL, atomic_json, data_root, job_path, read_json, workspace_locked
 
 
 def work(job_id: str) -> None:
@@ -28,7 +28,7 @@ def work(job_id: str) -> None:
 
 
 def _work(job_id: str) -> None:
-    """Own one workspace lock for the entire lifetime of the Humanize SDK run."""
+    """Execute one SDK run; the supervisor publishes its outcome after process cleanup."""
     from hmz.flows import BudgetExceeded
     from hmz.sdk import Hmz
 
@@ -36,6 +36,8 @@ def _work(job_id: str) -> None:
     request = read_json(path / "request.json")
     state = read_json(path / "state.json")
     state.update(status="starting", pid=os.getpid(), active_agents=[])
+    supervised = os.environ.get("HUMANIZE_CODEX_SUPERVISED") == job_id
+    outcome_status = None
     os.environ["HUMANIZE_CODEX_CHILD"] = "1"
     guard = threading.RLock()
     cancel = threading.Event()
@@ -46,7 +48,12 @@ def _work(job_id: str) -> None:
     guidance: list[str] = []
 
     def update(**values: Any) -> None:
+        nonlocal outcome_status
         with guard:
+            if supervised and values.get("status") in TERMINAL:
+                # Only the supervisor knows when all tracked descendants have stopped.
+                outcome_status = values["status"]
+                values.update(status="cleaning_up", active_agents=[])
             state.update(values, heartbeat=time.time())
             atomic_json(path / "state.json", state)
 
@@ -93,14 +100,14 @@ def _work(job_id: str) -> None:
                         "custom": True,
                     },
                 )
-        event(kind, role=role, text=str(text)[:4000])
+        event(kind, role=role, session=key, text=str(text)[:4000])
 
     def opened(role, agent, session, where) -> None:
         with guard:
             sessions.append(session)
             del sessions[:-20]
             session_roles[str(session)] = str(role)
-        event("session_opened", role=role)
+        event("session_opened", role=role, session=str(session))
 
     def control(run) -> None:
         for message in sorted((path / "inbox").glob("*.json")):
@@ -249,12 +256,13 @@ def _work(job_id: str) -> None:
             run.close()
             run.wait(10)
         finished.set()
-        update(finished=time.time(), active_agents=[])
-        if state["status"] == "complete" and request.get("retain_flow", True):
-            try:
-                profile = Library(data_root()).retain(job_id)
-                update(retained_flow=profile["name"], retention_class="candidate")
-                event("flow_retained", name=profile["name"], successes=profile["successes"])
-            except Exception as error:
-                # A library failure must not change an already reviewed task outcome.
-                update(retention_error=f"{type(error).__name__}: {error}")
+        if supervised:
+            update(status="cleaning_up", active_agents=[])
+            with guard:
+                atomic_json(
+                    path / "outcome.json",
+                    {**state, "status": outcome_status or "failed", "finished": time.time()},
+                )
+        else:
+            update(finished=time.time(), active_agents=[])
+            retain_completed(data_root(), job_id)

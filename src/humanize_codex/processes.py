@@ -27,7 +27,7 @@ class ProcessTree:
             except psutil.NoSuchProcess:
                 pass
 
-    def close(self) -> None:
+    def close(self, *, timeout: float = 5) -> None:
         # Stop spawning first, then discover descendants that appeared during the scan.
         suspended = set()
         while True:
@@ -47,6 +47,8 @@ class ProcessTree:
             except psutil.NoSuchProcess:
                 pass
         # Zombies cannot write; a still-running process must retain workspace ownership.
+        # The owner decides whether to retry; a timeout does not mean cleanup succeeded.
+        deadline = time.monotonic() + timeout
         while True:
             alive = []
             for process in self.owned.values():
@@ -57,12 +59,17 @@ class ProcessTree:
                     pass
             if not alive:
                 return
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Owned processes survived SIGKILL after {timeout:g}s: "
+                    + ", ".join(str(process.pid) for process in alive)
+                )
             time.sleep(0.05)
 
 
 def bounded_python(args: list[str], *, cwd, env, timeout: float) -> None:
     """Bound trusted inspection/fake validation and clean up their detached descendants."""
-    with subprocess.Popen(
+    process = subprocess.Popen(
         args,
         cwd=cwd,
         env=env,
@@ -70,16 +77,20 @@ def bounded_python(args: list[str], *, cwd, env, timeout: float) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
-    ) as process:
-        tree = ProcessTree(process.pid)
-        deadline = time.monotonic() + timeout
+    )
+    tree = ProcessTree(process.pid)
+    deadline = time.monotonic() + timeout
+    try:
+        while process.poll() is None:
+            tree.capture()
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(args, timeout)
+            time.sleep(0.05)
+        if process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, args)
+    finally:
         try:
-            while process.poll() is None:
-                tree.capture()
-                if time.monotonic() >= deadline:
-                    raise subprocess.TimeoutExpired(args, timeout)
-                time.sleep(0.05)
-            if process.returncode:
-                raise subprocess.CalledProcessError(process.returncode, args)
-        finally:
             tree.close()
+        finally:
+            # Popen.__exit__ waits without a deadline, even when close() timed out.
+            process.wait(timeout=5)

@@ -1,3 +1,3 @@
 """A Codex plugin for the Humanfia Humanize flow runtime."""
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"

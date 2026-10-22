@@ -18,6 +18,9 @@ import yaml
 
 from .store import atomic_json, job_path, locked, read_json
 
+# Roles the local manager adds to every authored flow; not part of its own contract.
+_RESERVED_ROLES = frozenset({"humanize_verifier", "humanize_observer"})
+
 
 def snapshot(source: Path, entrypoint: str = "") -> bytes:
     """Freeze a trusted self-contained flow without importing or executing it."""
@@ -280,6 +283,15 @@ class Library:
                     "curation",
                 )
             }
+            # Manager-only roles are not part of a flow's own contract.
+            exported["settings"] = {
+                **profile["settings"],
+                "agents": {
+                    role: spec
+                    for role, spec in profile["settings"].get("agents", {}).items()
+                    if role not in _RESERVED_ROLES
+                },
+            }
             exported["retained_source_sha256"] = exported["source_sha256"]
             exported["source_sha256"] = hashlib.sha256(exported_source).hexdigest()
             # Local validation identifiers are not part of a public source release.
@@ -362,3 +374,36 @@ class Library:
             "source_verified": False,
             "next": "Verify/install the pinned source before publishing this index",
         }
+
+
+def retain_completed(root: Path, job_id: str) -> None:
+    """Retain after the owner publishes completion; retention never changes the outcome."""
+    path = job_path(root, job_id)
+    state = read_json(path / "state.json")
+    if state["status"] != "complete" or not read_json(path / "request.json").get(
+        "retain_flow", True
+    ):
+        return
+    try:
+        profile = Library(root).retain(job_id)
+        at = time.time()
+        state.update(
+            retained_flow=profile["name"],
+            retention_class="candidate",
+            last_activity={"at": at, "kind": "flow_retained", "role": ""},
+        )
+        with (path / "events.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "at": at,
+                        "kind": "flow_retained",
+                        "name": profile["name"],
+                        "successes": profile["successes"],
+                    }
+                )
+                + "\n"
+            )
+    except Exception as error:
+        state["retention_error"] = f"{type(error).__name__}: {error}"
+    atomic_json(path / "state.json", state)

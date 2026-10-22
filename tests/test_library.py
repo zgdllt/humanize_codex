@@ -338,3 +338,20 @@ def test_custom_reuse_preserves_manager_backend_overrides(completed, tmp_path, m
     reused = Jobs(root).reuse("custom", str(tmp_path), "New task", allow_candidate=True)
     assert reused["agents"]["humanize_observer"] == "dsh/fake:low"
     assert reused["agents"]["humanize_verifier"] == "dsh/fake:low"
+
+
+def test_export_strips_manager_only_roles_from_settings(completed, tmp_path):
+    root, job_id, _ = completed
+    library = Library(root)
+    library.retain(job_id, "shared_flow", "Portable recipe")
+    profile_path = library.directory / "shared_flow" / "flow.json"
+    profile = json.loads(profile_path.read_text())
+    profile["settings"]["agents"].update(
+        humanize_verifier="codex/local:low", humanize_observer="codex/local:low"
+    )
+    atomic_json(profile_path, profile)
+    exported = library.export("shared_flow", str(tmp_path), "0.1.0", allow_candidate=True)
+    written = json.loads((tmp_path / exported["subdir"] / "flow.json").read_text())
+    assert "humanize_verifier" not in written["settings"]["agents"]
+    assert "humanize_observer" not in written["settings"]["agents"]
+    assert written["settings"]["agents"]

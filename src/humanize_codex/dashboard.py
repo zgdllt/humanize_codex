@@ -83,6 +83,7 @@ def public_state(state: dict) -> dict:
             "status",
             "created",
             "finished",
+            "heartbeat",
             "progress",
             "elapsed_seconds",
             "remaining_seconds",
@@ -104,6 +105,13 @@ def public_state(state: dict) -> dict:
         "mode": request["mode"],
         "read_only": request["read_only"],
         "evidence": state.get("result", {}).get("evidence", []),
+        "trace": state.get("trace")
+        or {
+            "spans": [],
+            "facts": [],
+            "created": state.get("created"),
+            "finished": state.get("finished"),
+        },
     }
 
 
@@ -133,7 +141,11 @@ def make_server(root: Path, token: str) -> ThreadingHTTPServer:
             elif route == base + "api":
                 try:
                     selected = parse_qs(urlsplit(self.path).query).get("job", [None])[0]
-                    states = [Jobs(root).status(selected)] if selected else Jobs(root).list()[:100]
+                    states = (
+                        [Jobs(root).status(selected, include_trace=True)]
+                        if selected
+                        else Jobs(root).list(limit=100, include_trace=True)
+                    )
                     content = json.dumps({"jobs": [public_state(s) for s in states]}).encode()
                 except (ValueError, OSError):
                     self.send_error(503, "Progress records temporarily unavailable")
