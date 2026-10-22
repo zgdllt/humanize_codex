@@ -31,6 +31,9 @@ def test_protocol_and_tools(tmp_path):
                 "humanize_steer",
                 "humanize_resume",
                 "humanize_doctor",
+                "humanize_inspect_flow",
+                "humanize_validate_flow",
+                "humanize_curate_flow",
             } <= names
             health = await client.call_tool("humanize_doctor", {})
             assert not health.isError

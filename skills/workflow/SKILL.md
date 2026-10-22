@@ -1,44 +1,42 @@
 ---
 name: humanize-workflow
-description: Run an explicitly requested Humanize adaptive workflow in Codex, with Codex/DSH role assignments, an independent status observer and reusable successful flows.
+description: Use adaptive Python workflows when a task benefits from staged work, evidence-driven branching, bounded iteration, independent verification or parallel agents. Select proactively; handle simple tasks directly.
 ---
 
-# Humanize workflow
+# Choose the right amount of workflow
 
-Use the real Humanize runtime through `humanize_*` MCP tools. Python branches decide the
-next stage; the flow-owned observer handles dashboard narration in its separate session.
+Use Humanize when coordination provides a concrete benefit. The user need not name this
+plugin. Handle a simple edit, answer or single check directly. For larger work, select the
+control structure from the task: sequence, bounded loop, conditional branch, parallel fanout/
+join, nested flows, or combinations. Do not force every task into an actor/reviewer loop.
 
-1. Inspect the objective, applicable AGENTS.md, worktree changes and verifiable acceptance
-   criteria. Preserve the user's authorized scope and protected processes.
-2. Check `humanize_doctor(workspace=...)` if readiness is unknown. Resolve prerequisites with
-   the setup skill. Never expose credential values. DSH uses its own account/environment.
-3. Inspect `humanize_library` for a relevant retained flow. Choose based on code, applicability
-   and observed evidence, not success counts alone. Reuse with `humanize_reuse_flow`, or start
-   `humanize_run` with the absolute workspace and complete task, constraints and validation.
-   This explicitly requested workflow delegates to planner, actor, reviewer and observer.
-   Use `read_only=true` for analysis/review-only tasks. Set agents per role when useful and
-   authorized; otherwise follow local Codex. Explicit models never silently fall back.
-4. Call `humanize_dashboard` once and share/open the returned read-only URL. The flow's
-   observer owns progress summaries; runtime records supply exact phases, budgets and
-   heartbeat. Do not ask the main execution agent to inspect logs, poll status or maintain
-   the dashboard. Do not duplicate every stage update in the parent conversation.
-5. The worker owns the workspace. Do not edit the same files or start overlapping workflows.
-   Wait with `humanize_wait` up to 60 seconds per call until terminal; omit after_revision
-   during normal operation so stage changes do not repeatedly consume parent attention.
-   Use status/events for an actual user question, troubleshooting or control receipts.
-   Tell the user about required decisions, material failure and final results; the dashboard
-   covers ordinary progress. Launching is not completion evidence.
-6. Forward corrections with `humanize_steer`. Check receipts; queued is not delivered.
-   The observer never receives implementation steering. DSH may accept guidance only next
-   turn. On an explicit stop, cancel and verify terminal; never automatically resume it.
-7. `complete` requires independent review evidence. blocked/round_limit/budget_exceeded/
-   failed/lost/cancelled mean unfinished. Verify important claims and report actual results,
-   checks, limits and useful artifacts. Resume only within continued authorization/budget.
-8. Reviewed complete flows are automatically retained privately. Name particularly reusable
-   ones with `humanize_save_flow` and an honest description of applicability. Never include
-   task secrets in descriptions/source. Export/version/index through the author skill when
-   useful; saving locally does not authorize publishing a flow or its traces.
+1. Inspect the objective, applicable AGENTS.md, existing changes and completion evidence.
+   Check runtime readiness when unknown. Keep model, permission and budget choices explicit.
+2. Search `humanize_library` for applicable curated flows. Read use_when/avoid_when and code;
+   success count alone is not a ranking. Candidates are hidden by default. Inspect them with
+   include_candidates=true when assessing a potentially useful recipe.
+3. Reuse a suitable curated flow, or author one through `humanize-author-flow`. Call
+   `humanize_run` with flow_file, entrypoint, agents keyed by the flow's own declared roles,
+   and flow_params for its inputs. The two built-in dynamic/review modes remain conveniences.
+   They are templates, not the definition of dynamic workflow. For a simple candidate trial,
+   allow_candidate=true is an explicit choice, not a claim that it has been curated.
+4. The manager adds independent verification and a separate status observer to generic flows.
+   The authored Python decides its own internal sequence, loops, branches and concurrency.
+   A verifier finding unfinished work produces needs_work; the manager does not secretly
+   replace the authored structure with a repair loop. Decide the next bounded action from
+   the evidence. No unapproved scope expansion or overlapping workspace writers.
+5. Open/share `humanize_dashboard` once. The observer owns narration; runtime events show all
+   active role sessions, including parallel work. The execution agents do not maintain the
+   page or poll progress. In the parent, wait up to 60 seconds per call; report required
+   decisions and final outcomes instead of repeating every stage.
+6. Steer a generic flow by naming its task role. Untargeted guidance is stored for the flow;
+   arbitrary Python must explicitly read it if needed. Check delivery receipts. Cancellation
+   is complete only at terminal state; do not automatically resume a user-cancelled task.
+7. Complete plus independent review evidence admits a flow to the private candidate pool.
+   For useful recipes, assess reusability and limitations, test relevant control paths using
+   humanize_validate_flow, then humanize_curate_flow. Promotion requires at least two passing
+   scenarios for the exact code/entry and an applicability assessment. Reject brittle,
+   task-bound or redundant candidates; more successful runs alone do not make a good flow.
 
-Defaults: six rounds, 30 minutes, 50,000 output tokens shared by all roles. Honor user limits.
-Do not publish, send messages, spend beyond authorization or operate hardware without the
-user's permission. Preserve dirty worktree changes. Do not recursively launch Humanize.
+Keep the original goal, user changes, protected processes and authorization boundaries.
+Respect task-specific budgets. Sub-workflows cannot recursively launch this manager.

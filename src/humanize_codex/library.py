@@ -19,14 +19,27 @@ import yaml
 from .store import atomic_json, job_path, locked, read_json
 
 
-def snapshot(source: Path) -> bytes:
+def snapshot(source: Path, entrypoint: str = "") -> bytes:
     """Freeze a trusted self-contained flow without importing or executing it."""
     content = source.read_bytes()
     if len(content) > 1024 * 1024:
         raise ValueError("A managed flow must be a self-contained Python file under 1 MiB")
     tree = ast.parse(content, filename=source.name)
     entries = {node.name for node in tree.body if isinstance(node, ast.AsyncFunctionDef)}
-    if not {"dynamic_workflow", "read_only_workflow"} <= entries:
+    for node in tree.body:
+        if isinstance(node, ast.AsyncFunctionDef):
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call):
+                    entries.update(
+                        k.value.value
+                        for k in decorator.keywords
+                        if k.arg == "name"
+                        and isinstance(k.value, ast.Constant)
+                        and isinstance(k.value.value, str)
+                    )
+    if entrypoint and entrypoint not in entries:
+        raise ValueError(f"No async flow entrypoint {entrypoint!r}")
+    if not entrypoint and not {"dynamic_workflow", "read_only_workflow"} <= entries:
         raise ValueError("A managed flow must export dynamic_workflow and read_only_workflow")
     if any(isinstance(node, ast.ImportFrom) and node.level for node in ast.walk(tree)):
         raise ValueError(
@@ -59,10 +72,12 @@ class Library:
         path = self.directory / _name(name) / "flow.json"
         if not path.is_file():
             raise ValueError(f"Unknown retained flow: {name}")
-        return read_json(path)
+        profile = read_json(path)
+        profile.setdefault("curation", {"status": "candidate", "reason": "Not yet assessed"})
+        return profile
 
     def list(self) -> list[dict[str, Any]]:
-        return [read_json(path) for path in sorted(self.directory.glob("*/flow.json"))]
+        return [self.get(path.parent.name) for path in sorted(self.directory.glob("*/flow.json"))]
 
     def retain(self, job_id: str, name: str = "", description: str = "") -> dict[str, Any]:
         path = job_path(self.root, job_id)
@@ -78,7 +93,7 @@ class Library:
             )
         if len(description) > 2000:
             raise ValueError("description must be at most 2000 characters")
-        content = snapshot(path / "workflow.py")
+        content = snapshot(path / "workflow.py", request.get("entrypoint", ""))
         source_hash = hashlib.sha256(content).hexdigest()
         settings = {
             "mode": request["mode"],
@@ -87,9 +102,11 @@ class Library:
             "agents": state.get("agents")
             or {
                 role: request.get("agents", {}).get(role) or request["agent"]
-                for role in ("planner", "actor", "reviewer", "observer")
+                for role in request.get("role_names", ("planner", "actor", "reviewer", "observer"))
             },
         }
+        if request.get("entrypoint"):
+            settings["entrypoint"] = request["entrypoint"]
         fingerprint = hashlib.sha256(
             (source_hash + json.dumps(settings, sort_keys=True)).encode()
         ).hexdigest()
@@ -113,6 +130,10 @@ class Library:
                     "created": time.time(),
                     "successes": 0,
                     "observations": {},
+                    "curation": {
+                        "status": "candidate",
+                        "reason": "Reviewed task success; flow reuse value has not been assessed",
+                    },
                 }
             if job_id not in profile["observations"]:
                 profile["observations"][job_id] = {
@@ -127,13 +148,77 @@ class Library:
             atomic_json(target / "flow.json", profile)
         return profile
 
-    def export(self, name: str, destination: str, version: str = "0.1.0") -> dict[str, Any]:
+    def curate(
+        self,
+        name: str,
+        verdict: str,
+        rationale: str,
+        use_when: list[str],
+        avoid_when: list[str],
+        validation_id: str = "",
+    ) -> dict[str, Any]:
+        """Separate an agent's reuse assessment from deterministic test/run evidence."""
+        if verdict not in {"promote", "reject", "needs_evidence"} or not rationale.strip():
+            raise ValueError("Supply promote/reject/needs_evidence and a reason")
+        with locked(self.directory):
+            profile = self.get(name)
+            if verdict == "promote":
+                if (
+                    not use_when
+                    or not avoid_when
+                    or not all(isinstance(x, str) and x.strip() for x in [*use_when, *avoid_when])
+                ):
+                    raise ValueError("Promotion requires applicability and limitations")
+                if not re.fullmatch(r"[a-f0-9]{32}", validation_id):
+                    raise ValueError("Promotion requires a flow validation receipt")
+                receipt = read_json(self.root / "validations" / validation_id / "receipt.json")
+                entry = profile["settings"].get("entrypoint") or (
+                    "read_only_workflow" if profile["settings"]["read_only"] else "dynamic_workflow"
+                )
+                if (
+                    receipt.get("status") != "passed"
+                    or len(receipt.get("cases", [])) < 2
+                    or any(c.get("status") != "passed" for c in receipt.get("cases", []))
+                    or len({c.get("scenario") for c in receipt.get("cases", [])}) < 2
+                    or receipt.get("source_sha256") != profile["source_sha256"]
+                    or receipt.get("entrypoint") != entry
+                ):
+                    raise ValueError(
+                        "Need at least two passing cases for this exact code and entry"
+                    )
+                self.source(name)  # Refuse code modified since the tested snapshot.
+            profile["curation"] = {
+                "status": {
+                    "promote": "curated",
+                    "reject": "rejected",
+                    "needs_evidence": "candidate",
+                }[verdict],
+                "rationale": rationale,
+                "use_when": use_when,
+                "avoid_when": avoid_when,
+                "validation_id": validation_id,
+                "assessed": time.time(),
+                "assessment": "Agent judgment, backed by observed runs and scripted cases; "
+                "not a general performance guarantee",
+            }
+            atomic_json(self.directory / _name(name) / "flow.json", profile)
+            return profile
+
+    def export(
+        self, name: str, destination: str, version: str = "0.1.0", allow_candidate: bool = False
+    ) -> dict[str, Any]:
         """Write an immutable source release, separately from its Flowverse index."""
         semver.Version.parse(version)
         root = Path(destination).expanduser()
         if not root.is_absolute() or not root.is_dir():
             raise ValueError("destination must be an existing absolute local checkout/directory")
         profile = self.get(name)
+        if profile["curation"]["status"] == "rejected":
+            raise ValueError("This flow was rejected; reassess it before exporting")
+        if profile["curation"]["status"] != "curated" and not allow_candidate:
+            raise ValueError(
+                "Only curated flows export by default; explicitly allow a candidate trial"
+            )
         source = self.source(name)
         subdir = Path("bundles") / _name(name) / version / name
         target = root.resolve() / subdir
@@ -146,14 +231,34 @@ class Library:
         temporary = Path(tempfile.mkdtemp(prefix=".flow-export-", dir=parent))
         try:
             # Humanize resolves installed flows by their directory's name.
-            entry = "read_only_workflow" if profile["settings"]["read_only"] else "dynamic_workflow"
+            entry = profile["settings"].get("entrypoint") or (
+                "read_only_workflow" if profile["settings"]["read_only"] else "dynamic_workflow"
+            )
             tree = ast.parse(source.read_bytes())
             named_entry = next(
                 node
                 for node in tree.body
-                if isinstance(node, ast.AsyncFunctionDef) and node.name == entry
+                if isinstance(node, ast.AsyncFunctionDef)
+                and (
+                    node.name == entry
+                    or any(
+                        isinstance(d, ast.Call)
+                        and any(
+                            k.arg == "name"
+                            and isinstance(k.value, ast.Constant)
+                            and k.value.value == entry
+                            for k in d.keywords
+                        )
+                        for d in node.decorator_list
+                    )
+                )
             )
             named_entry.name = name
+            for decorator in named_entry.decorator_list:
+                if isinstance(decorator, ast.Call):
+                    for keyword in decorator.keywords:
+                        if keyword.arg == "name":
+                            keyword.value = ast.Constant(name)
             exported_source = (
                 source.read_bytes()
                 + (
@@ -172,16 +277,18 @@ class Library:
                     "source_sha256",
                     "settings",
                     "successes",
+                    "curation",
                 )
             }
             exported["retained_source_sha256"] = exported["source_sha256"]
             exported["source_sha256"] = hashlib.sha256(exported_source).hexdigest()
+            # Local validation identifiers are not part of a public source release.
+            exported["curation"].pop("validation_id", None)
             atomic_json(temporary / "flow.json", exported)
             (temporary / "README.md").write_text(
                 f"# {name}\n\n{profile['description']}\n\n"
                 "Self-contained Humanize source bundle (hmz 0.2.1).\n"
-                "Select `:dynamic_workflow` or `:read_only_workflow` and supply the roles\n"
-                "planner, actor, reviewer, observer. Settings are recorded in flow.json.\n"
+                f"Select `:{name}`; original entry: {entry}. Role settings are in flow.json.\n"
                 "Local successes are observations, not a cross-task benchmark.\n"
                 "No task prompts, review transcripts or credentials are exported.\n"
                 "Generate a pinned flow.yaml in a separate Flowverse index after committing\n"
@@ -215,6 +322,8 @@ class Library:
         from hmz.runtime.flowing.index import Release
 
         profile = self.get(name)
+        if profile["curation"]["status"] != "curated":
+            raise ValueError("Only curated flows may be indexed for reuse")
         if "://" in repo:
             parsed = urlsplit(repo)
             if (

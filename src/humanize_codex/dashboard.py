@@ -14,7 +14,9 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
+from . import __version__
 from .store import TERMINAL, atomic_json, data_root, locked, read_json
 
 
@@ -33,7 +35,7 @@ def _url(record: dict) -> str:
 def _healthy(record: dict) -> bool:
     try:
         with urllib.request.urlopen(_url(record) + "health", timeout=0.5) as response:
-            return json.load(response) == {"ok": True}
+            return json.load(response) == {"ok": True, "version": __version__}
     except (OSError, ValueError, urllib.error.URLError):
         return False
 
@@ -89,8 +91,14 @@ def public_state(state: dict) -> dict:
             "agents",
             "retained_flow",
             "report",
+            "active_agents",
+            "retention_class",
         )
     } | {
+        "flow": {
+            k: state.get("flow", {}).get(k)
+            for k in ("entrypoint", "structures", "description", "structure_note")
+        },
         "workspace": request["workspace"],
         "budget": request["budget"],
         "mode": request["mode"],
@@ -120,10 +128,12 @@ def make_server(root: Path, token: str) -> ThreadingHTTPServer:
                 content = Path(__file__).with_name("dashboard.html").read_bytes()
                 kind = "text/html; charset=utf-8"
             elif route == base + "health":
-                content, kind = b'{"ok":true}', "application/json"
+                content = json.dumps({"ok": True, "version": __version__}).encode()
+                kind = "application/json"
             elif route == base + "api":
                 try:
-                    states = Jobs(root).list()[:100]
+                    selected = parse_qs(urlsplit(self.path).query).get("job", [None])[0]
+                    states = [Jobs(root).status(selected)] if selected else Jobs(root).list()[:100]
                     content = json.dumps({"jobs": [public_state(s) for s in states]}).encode()
                 except (ValueError, OSError):
                     self.send_error(503, "Progress records temporarily unavailable")

@@ -1,12 +1,12 @@
 {
   "name": "humanfia-humanize",
-  "version": "0.2.0",
-  "description": "Humanfia Humanize dynamic workflows for Codex",
+  "version": "0.3.0",
+  "description": "Task-shaped Humanize Python workflows for Codex and DSH, with independent status and a curated flow library.",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Humanfia Humanize",
-    "shortDescription": "Adaptive plan, implement, review and repair",
+    "shortDescription": "Adaptive Python flows, parallel roles and curated reuse",
     "category": "Developer Tools"
   }
 }

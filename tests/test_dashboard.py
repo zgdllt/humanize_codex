@@ -29,6 +29,30 @@ def test_dashboard_projection_omits_tasks_and_transcripts():
     assert shown["evidence"] == ["tested"]
 
 
+def test_generic_projection_exposes_runtime_roles_without_input_schema():
+    shown = public_state(
+        {
+            "job_id": "a" * 32,
+            "status": "running",
+            "request": {
+                "workspace": "/tmp/work",
+                "budget": {},
+                "mode": "dynamic",
+                "read_only": True,
+            },
+            "flow": {
+                "entrypoint": "parallel_flow",
+                "structures": ["sequence", "parallel"],
+                "params_schema": {"default": "PRIVATE_INPUT"},
+            },
+            "active_agents": [{"role": "first"}, {"role": "second"}],
+        }
+    )
+    assert shown["flow"]["entrypoint"] == "parallel_flow"
+    assert len(shown["active_agents"]) == 2
+    assert "PRIVATE_INPUT" not in json.dumps(shown)
+
+
 def test_dashboard_is_live_and_rejects_wrong_token_host_origin_and_writes(tmp_path):
     server = make_server(tmp_path, "a" * 64)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

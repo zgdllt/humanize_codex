@@ -1,10 +1,10 @@
 [project]
 name = "humanfia-humanize-codex"
-version = "0.2.0"
+version = "0.3.0"
 description = "Humanfia Humanize dynamic workflows for Codex"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-dependencies = ["hmz[dsh]==0.2.1", "mcp>=1.26,<2"]
+dependencies = ["hmz[dsh]==0.2.1", "mcp>=1.26,<2", "psutil>=7.2,<8"]
 
 [project.scripts]
 humanize-codex = "humanize_codex.cli:main"

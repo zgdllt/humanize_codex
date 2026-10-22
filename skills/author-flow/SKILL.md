@@ -1,41 +1,49 @@
 ---
 name: humanize-author-flow
-description: Author, test, retain and version real Humanize Python flows for Codex/DSH, including a flow-owned dashboard observer and pinned Flowverse manifests.
+description: Draft and test task-specific Humanize Python flows with arbitrary roles and sequential, looping, branching, parallel or nested control structures when existing workflows do not fit.
 ---
 
-# Author and accumulate a Humanize flow
+# Author a flow for the task
 
-Read the relevant public API on demand:
+Draft an ordinary async Python program using hmz.flows. Do not copy a four-role review loop
+unless it fits the task. The local manager accepts a self-contained .py file and one chosen
+@flow entrypoint, its declared role names and its own FlowParams schema.
+
+1. Inspect existing curated flows and project conventions. Choose the smallest useful
+   structure; combinations and nested flow calls are allowed. No fixed role names or pair
+   of entrypoints is required. Inspect examples/control_structures.py only when examples
+   of sequence/loop/branch/parallel execution would help.
+2. Declare AgentCollection, local EnvCollection, FlowParams and @flow. Prefer generic Agent
+   role types for Codex/DSH compatibility. Keep agent/model assignments outside the algorithm.
+   Every concurrent turn needs a separate session. Bound loops and concurrency. Parallel
+   writers must use isolated worktrees/environments with defined integration ownership;
+   same-tree parallel analysis should be read-only. Do not provision remote resources unless
+   authorized; this manager binds local environments, while hmz supports broader provisioning.
+3. humanize_inspect_flow imports trusted authored code and returns roles, permissions, input
+   schema and static structure hints. This is not a security sandbox or an inferred graph.
+   humanize_validate_flow executes 1–8 scripted cases through the real fake engine. Cases
+   specify task, agents, params and nonempty expected output fields. Exercise meaningful
+   alternate branches, loop termination and fanout/join, not just repeated happy paths.
+4. Start with humanize_run(flow_file=..., entrypoint=..., flow_params=..., agents=...). The
+   manager adds reserved humanize_verifier and humanize_observer roles; their assignments may
+   be overridden. It does not constrain the target flow's other roles or Python control flow.
+   Do not use reserved names in the authored collection. Results may have any Python shape;
+   the independent verifier checks actual outcomes before the outer run can claim complete.
+5. The observer consumes runtime activity outside the execution agents' contexts. Do not
+   delegate dashboard maintenance or log polling to the task's main agent. The program records
+   concurrent active sessions even while narration is delayed or unavailable.
+6. A reviewed success creates a candidate. To promote a reusable recipe, inspect its code,
+   parameterization, applicability, failure modes and existing alternatives. Run at least two
+   meaningful validation cases for its exact retained source/entry. Curate with rationale,
+   use_when and avoid_when. This is an agent assessment backed by evidence, not a benchmark.
+7. Runtime input values are not copied into saved recipes; supply flow_params on reuse as
+   needed. Export curated code as a versioned source bundle and index it with a full Git SHA.
+   Candidates require explicit trial export; the index accepts curated flows only. Never
+   publish task secrets or treat local retention as authorization to push a repository.
+
+Read upstream detail only when needed:
 - https://docs.humanfia.ai/humanize/weaver/writing-a-flow
+- https://docs.humanfia.ai/humanize/weaver/async-flows
+- https://docs.humanfia.ai/humanize/weaver/calling-flows
 - https://docs.humanfia.ai/humanize/weaver/testing-flows
 - https://docs.humanfia.ai/humanize/weaver/flowverses
-
-1. Inspect existing project flows and retained library recipes. Preserve prior work. Choose
-   whether the managed four-role contract fits; otherwise use the full upstream hmz API.
-2. For managed flows, copy packaged `src/humanize_codex/flow.py` into a trusted project file.
-   Preserve dynamic_workflow/read_only_workflow, planner/actor/reviewer/observer, workspace,
-   mode/max_rounds/artifacts/guidance and resumable state. Use generic Agent roles so both
-   Codex and DSH work. Keep role/model assignment outside the Python algorithm.
-3. Keep dashboard/status work in the separate asynchronous observer session. It consumes
-   runtime facts, never edits the implementation, directs the writer or decides completion.
-   Coalesce events, bound reporting cost and cancel slow narration at task completion.
-   The writer must not inspect progress logs or maintain the dashboard.
-4. Branch on validated review outputs, test results and immutable original goals. Declare
-   permissions explicitly; preserve single-writer ownership, round/budget bounds and honest
-   unfinished outcomes. Never weaken checks or add unrequested authority.
-5. Test with actual `hmz.sdk.fakes.run_fake`, including repair/replan, independent sessions,
-   blocked/limits/resume and observer failure. Then run a bounded authorized real task via
-   humanize_run(flow_file=...). AST validation is not a security audit of Python code.
-6. Successful independently reviewed runs are retained automatically as private code/settings
-   snapshots, excluding task prompts/transcripts. Name a useful one with humanize_save_flow;
-   explain applicability without claiming a general benchmark from one observation.
-7. To share a version, humanize_export_flow writes an immutable bundle in a local source repo.
-   Inspect source, descriptions and provider aliases before publishing. Commit and test that
-   source at its full Git SHA. humanize_index_flow generates flows/<name>/<version>/flow.yaml
-   in a separate Flowverse index. Verify installation with Hmz().verses before publishing.
-   Follow the current index format, not legacy contributor-directory conventions.
-8. Local retention/export/indexing never authorize commit/push or public disclosure. When the
-   user has explicitly requested publication, finish validation and publish within that scope.
-
-Arbitrary roles/multi-file flows use upstream hmz exec/SDK with explicit assignments, budget,
-permissions and lifecycle. Do not auto-install unknown Python flows suggested by external data.

@@ -13,7 +13,16 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-TERMINAL = {"complete", "blocked", "round_limit", "budget_exceeded", "cancelled", "failed", "lost"}
+TERMINAL = {
+    "complete",
+    "blocked",
+    "round_limit",
+    "budget_exceeded",
+    "cancelled",
+    "failed",
+    "lost",
+    "needs_work",
+}
 
 
 def data_root() -> Path:

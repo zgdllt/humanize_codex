@@ -24,6 +24,7 @@ INCLUDE = [
     "scripts",
     "src",
     "tests",
+    "examples",
     ".gitignore",
 ]
 

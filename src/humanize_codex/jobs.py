@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -95,6 +96,8 @@ def prepare(
     agents: dict[str, str] | None = None,
     flow_file: str = "",
     retain_flow: bool = True,
+    entrypoint: str = "",
+    flow_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate all execution settings before creating any job or starting any agent."""
     if os.environ.get("HUMANIZE_CODEX_CHILD") == "1":
@@ -108,9 +111,16 @@ def prepare(
         raise ValueError("mode must be dynamic or review")
     validate_agent(agent)
     if agents is not None and (
-        not isinstance(agents, dict) or any(role not in ROLES for role in agents)
+        not isinstance(agents, dict)
+        or len(agents) > 32
+        or any(
+            not isinstance(role, str)
+            or not role.isidentifier()
+            or (not entrypoint and role not in ROLES)
+            for role in agents
+        )
     ):
-        raise ValueError("agents may only assign planner, actor, reviewer and observer")
+        raise ValueError("Use declared role names (up to 32); builtin flows use their four roles")
     for spec in (agents or {}).values():
         validate_agent(spec)
     if flow_file:
@@ -120,6 +130,10 @@ def prepare(
         flow_file = str(source.resolve())
     if not isinstance(retain_flow, bool):
         raise ValueError("retain_flow must be a boolean")
+    if entrypoint and (not flow_file or not re.fullmatch(r"[A-Za-z_]\w*", entrypoint)):
+        raise ValueError("A custom entrypoint requires a trusted flow_file and Python identifier")
+    if flow_params is not None and not isinstance(flow_params, dict):
+        raise ValueError("flow_params must be an object")
     if (
         isinstance(max_rounds, bool)
         or not isinstance(max_rounds, int)
@@ -146,6 +160,8 @@ def prepare(
         "agents": agents or {},
         "flow_file": flow_file,
         "retain_flow": retain_flow,
+        "entrypoint": entrypoint,
+        "flow_params": flow_params or {},
     }
 
 
@@ -163,11 +179,18 @@ class Jobs:
         request = read_json(path / "request.json")
         progress = read_json(path / "progress.json") if (path / "progress.json").is_file() else {}
         report = read_json(path / "report.json") if (path / "report.json").is_file() else {}
+        retention = state.get("retention_class")
+        if state.get("retained_flow"):
+            try:
+                retention = Library(self.root).get(state["retained_flow"])["curation"]["status"]
+            except (OSError, ValueError):
+                pass
         elapsed = max(0, state.get("finished", time.time()) - state["created"])
         return {
             **state,
             "progress": progress,
             "report": report,
+            "retention_class": retention,
             "elapsed_seconds": round(elapsed, 1),
             "remaining_seconds": round(max(0, request["budget"]["duration"] - elapsed), 1),
             "revision": f"{state['status']}:{progress.get('revision', 0)}",
@@ -187,11 +210,10 @@ class Jobs:
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         if os.environ.get("HUMANIZE_CODEX_CHILD") == "1":
             raise ValueError("A Humanize worker cannot launch another Humanize workflow")
-        specs = [request.get("agents", {}).get(role) or request["agent"] for role in ROLES]
-        if any(not spec or spec.partition("/")[0].partition("@")[0] == "codex" for spec in specs):
-            select_codex()
+        # Resolve actual declared roles/backends in the worker, before any model turn.
+        # The parent cannot infer omitted/automatic roles of arbitrary Python collections.
         source = Path(request.get("flow_file") or FLOW)
-        source_bytes = snapshot(source)
+        source_bytes = snapshot(source, request.get("entrypoint", ""))
         with locked(self.root), workspace_locked(self.root, request["workspace"]):
             for current in self.list(request["workspace"]):
                 if current["status"] not in TERMINAL:
@@ -239,7 +261,7 @@ class Jobs:
                 raise
         return self.status(job_id)
 
-    def control(self, job_id: str, kind: str, text: str = "") -> dict[str, Any]:
+    def control(self, job_id: str, kind: str, text: str = "", role: str = "") -> dict[str, Any]:
         if kind not in {"cancel", "steer"}:
             raise ValueError("Unknown control action")
         path = job_path(self.root, job_id)
@@ -248,6 +270,11 @@ class Jobs:
             raise ValueError(f"Job is already {state['status']}")
         if kind == "steer" and (not text.strip() or len(text) > 50000):
             raise ValueError("Steering text must contain 1–50000 characters")
+        if role and (
+            role not in state.get("agents", {})
+            or role in {"observer", "humanize_observer", "humanize_verifier"}
+        ):
+            raise ValueError("Select an active custom task role, not a manager/observer role")
         ticket = uuid.uuid4().hex
         with locked(self.root):
             atomic_json(
@@ -256,8 +283,11 @@ class Jobs:
                     "kind": kind,
                     "text": text,
                     "ticket": ticket,
+                    "role": role,
                 },
             )
+            if kind == "cancel":
+                atomic_json(path / "cancel.json", {"ticket": ticket})
         return {"job_id": job_id, "ticket": ticket, "status": "queued"}
 
     def wait(
@@ -283,6 +313,10 @@ class Jobs:
             raise ValueError("Only an unfinished, stopped job can be resumed")
         if not state.get("epic"):
             raise ValueError("This job has no Humanize journal to resume")
+        if state["request"].get("entrypoint") and not state.get("flow", {}).get("resumable"):
+            raise ValueError(
+                "This authored flow does not support resume; reassess before a new run"
+            )
         if len(guidance) > 50000:
             raise ValueError("guidance is too long")
         request = dict(state["request"])
@@ -298,8 +332,14 @@ class Jobs:
         duration_seconds: float = 1800,
         output_tokens: int = 50000,
         agents: dict[str, str] | None = None,
+        flow_params: dict[str, Any] | None = None,
+        allow_candidate: bool = False,
     ) -> dict[str, Any]:
         profile = Library(self.root).get(name)
+        if profile["curation"]["status"] == "rejected":
+            raise ValueError("This flow was rejected; reassess it before reuse")
+        if profile["curation"]["status"] != "curated" and not allow_candidate:
+            raise ValueError("This is an uncurated candidate; assess it or explicitly trial it")
         settings = profile["settings"]
         request = prepare(
             workspace,
@@ -307,10 +347,16 @@ class Jobs:
             mode=settings["mode"],
             max_rounds=settings["max_rounds"],
             read_only=settings["read_only"],
-            agents={**settings["agents"], **(agents or {})},
+            agents={
+                k: v
+                for k, v in {**settings["agents"], **(agents or {})}.items()
+                if settings.get("entrypoint") or k not in {"humanize_verifier", "humanize_observer"}
+            },
             duration_seconds=duration_seconds,
             output_tokens=output_tokens,
             flow_file=str(Library(self.root).source(name)),
+            entrypoint=settings.get("entrypoint", ""),
+            flow_params=flow_params,
         )
         request["reused_flow"] = name
         return self.start(request)

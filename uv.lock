@@ -332,11 +332,12 @@ wheels = [
 
 [[package]]
 name = "humanfia-humanize-codex"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "hmz", extra = ["dsh"] },
     { name = "mcp" },
+    { name = "psutil" },
 ]
 
 [package.dev-dependencies]
@@ -349,6 +350,7 @@ dev = [
 requires-dist = [
     { name = "hmz", extras = ["dsh"], specifier = "==0.2.1" },
     { name = "mcp", specifier = ">=1.26,<2" },
+    { name = "psutil", specifier = ">=7.2,<8" },
 ]
 
 [package.metadata.requires-dev]

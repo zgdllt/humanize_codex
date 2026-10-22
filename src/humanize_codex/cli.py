@@ -19,6 +19,7 @@ def main() -> None:
         sub.add_parser(name)
     for name in (
         "worker",
+        "execute-worker",
         "status",
         "cancel",
         "events",
@@ -41,11 +42,13 @@ def main() -> None:
     item.add_argument("name")
     item.add_argument("destination")
     item.add_argument("--version", default="0.1.0")
+    item.add_argument("--allow-candidate", action="store_true")
     item = sub.add_parser("reuse")
     item.add_argument("name")
     item.add_argument("--workspace", required=True)
     item.add_argument("--task-file", required=True)
     item.add_argument("--duration", type=float, default=1800)
+    item.add_argument("--allow-candidate", action="store_true")
     item = sub.add_parser("run")
     item.add_argument("--workspace", required=True)
     item.add_argument("--task-file", required=True)
@@ -57,6 +60,12 @@ def main() -> None:
     item.add_argument("--role", action="append", default=[], metavar="ROLE=SPEC")
     item.add_argument("--flow-file", default="")
     item.add_argument("--no-retain", action="store_true")
+    item.add_argument("--entrypoint", default="")
+    item.add_argument("--params-file")
+    item = sub.add_parser("validate-worker")
+    item.add_argument("directory")
+    item = sub.add_parser("inspect-worker")
+    item.add_argument("directory")
     args = parser.parse_args()
     if args.command == "serve":
         from .server import mcp
@@ -64,14 +73,48 @@ def main() -> None:
         mcp.run(transport="stdio")
         return
     if args.command == "worker":
-        from .worker import work
+        from .supervisor import supervise
 
-        work(args.job_id)
+        supervise(args.job_id)
+        return
+    if args.command == "execute-worker":
+        from .worker import _work
+
+        _work(args.job_id)
         return
     if args.command == "dashboard-worker":
         from .dashboard import serve_dashboard
 
         serve_dashboard()
+        return
+    if args.command == "inspect-worker":
+        from .custom import _inspect_flow
+        from .store import atomic_json, read_json
+
+        directory = Path(args.directory)
+        spec = read_json(directory / "input.json")
+        try:
+            result = _inspect_flow(
+                str(directory / "workflow.py"), spec["entrypoint"], spec["workspace"]
+            )
+        except Exception as error:
+            result = {"error": f"{type(error).__name__}: {error}"}
+        atomic_json(directory / "declaration.json", result)
+        return
+    if args.command == "validate-worker":
+        from .custom import fake_cases
+        from .store import atomic_json, read_json
+
+        directory = Path(args.directory)
+        spec = read_json(directory / "input.json")
+        atomic_json(
+            directory / "receipt.json",
+            fake_cases(
+                str(directory / "workflow.py"),
+                spec["entrypoint"],
+                spec["cases"],
+            ),
+        )
         return
     jobs = Jobs()
     if args.command == "doctor":
@@ -89,6 +132,10 @@ def main() -> None:
                 agents=dict(spec.split("=", 1) for spec in args.role),
                 flow_file=args.flow_file,
                 retain_flow=not args.no_retain,
+                entrypoint=args.entrypoint,
+                flow_params=json.loads(Path(args.params_file).read_text())
+                if args.params_file
+                else {},
             )
         )
     elif args.command == "list":
@@ -98,10 +145,16 @@ def main() -> None:
     elif args.command == "save":
         result = Library(data_root()).retain(args.job_id, args.name, args.description)
     elif args.command == "export":
-        result = Library(data_root()).export(args.name, args.destination, args.version)
+        result = Library(data_root()).export(
+            args.name, args.destination, args.version, args.allow_candidate
+        )
     elif args.command == "reuse":
         result = jobs.reuse(
-            args.name, args.workspace, Path(args.task_file).read_text(), args.duration
+            args.name,
+            args.workspace,
+            Path(args.task_file).read_text(),
+            args.duration,
+            allow_candidate=args.allow_candidate,
         )
     elif args.command == "dashboard":
         from .dashboard import ensure_dashboard

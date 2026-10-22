@@ -35,13 +35,14 @@ def _work(job_id: str) -> None:
     path = job_path(data_root(), job_id)
     request = read_json(path / "request.json")
     state = read_json(path / "state.json")
-    state.update(status="starting", pid=os.getpid())
+    state.update(status="starting", pid=os.getpid(), active_agents=[])
     os.environ["HUMANIZE_CODEX_CHILD"] = "1"
     guard = threading.RLock()
     cancel = threading.Event()
     finished = threading.Event()
     sessions: list[Any] = []
     session_roles: dict[str, str] = {}
+    active: dict[str, dict] = {}
     guidance: list[str] = []
 
     def update(**values: Any) -> None:
@@ -62,7 +63,37 @@ def _work(job_id: str) -> None:
 
     def watch(agent, session, item) -> None:
         text = getattr(item, "text", "")
-        event(str(item.kind), role=session_roles.get(str(session), ""), text=str(text)[:4000])
+        key, kind = str(session), str(item.kind)
+        role = session_roles.get(key, getattr(agent, "role", ""))
+        with guard:
+            if kind == "begins":
+                active[key] = {"role": role, "started": time.time()}
+            elif kind == "ends":
+                active.pop(key, None)
+            update(active_agents=list(active.values()))
+            if (
+                request.get("entrypoint")
+                and kind in {"begins", "ends"}
+                and role not in {"humanize_observer", "humanize_verifier"}
+            ):
+                running = [
+                    x["role"]
+                    for x in active.values()
+                    if x["role"] not in {"humanize_observer", "humanize_verifier"}
+                ]
+                atomic_json(
+                    path / "progress.json",
+                    {
+                        "revision": time.time_ns(),
+                        "stage": "custom",
+                        "role": role,
+                        "message": "Active roles: " + (", ".join(running) or "Python control flow"),
+                        "active_roles": running,
+                        "updated": time.time(),
+                        "custom": True,
+                    },
+                )
+        event(kind, role=role, text=str(text)[:4000])
 
     def opened(role, agent, session, where) -> None:
         with guard:
@@ -81,12 +112,13 @@ def _work(job_id: str) -> None:
             else:
                 guidance.append(item["text"])
                 atomic_json(path / "guidance.json", guidance)
-                delivery = "next_turn"
+                delivery = "available_to_flow" if request.get("entrypoint") else "next_turn"
+                desired = item.get("role") or ("" if request.get("entrypoint") else "actor")
                 with guard:
                     candidates = [
                         session
                         for session in reversed(sessions)
-                        if session_roles.get(str(session)) == "actor"
+                        if session_roles.get(str(session)) == desired and desired
                     ]
                 for session in candidates:
                     try:
@@ -103,8 +135,36 @@ def _work(job_id: str) -> None:
     threading.Thread(target=heartbeat, daemon=True).start()
     run = None
     try:
+        chosen = "read_only_workflow" if request["read_only"] else "dynamic_workflow"
+        source = path / "workflow.py"
+        roles = list(ROLES)
+        params = {
+            "mode": request["mode"],
+            "max_rounds": request["max_rounds"],
+            "artifacts": str(path),
+            "guidance": request.get("guidance", ""),
+        }
+        if request.get("entrypoint"):
+            from .custom import RESERVED, make_envelope
+
+            source, info = make_envelope(path, request["entrypoint"], request["read_only"])
+            declared = Hmz(request["workspace"]).flows.declared(
+                f"{path / 'workflow.py'}:{request['entrypoint']}"
+            )
+            declared.params.model_validate(request.get("flow_params", {}))
+            roles = [r["name"] for r in info["roles"] if not r["auto"]] + list(RESERVED)
+            if set(request.get("agents", {})) - set(roles):
+                raise ValueError("Agent assignments contain roles not declared by this flow")
+            chosen = "managed"
+            params = {
+                "inputs": request.get("flow_params", {}),
+                "artifacts": str(path),
+                "guidance": request.get("guidance", ""),
+                "max_rounds": request["max_rounds"],
+            }
+            update(flow=info)
         assignments = {
-            role: request.get("agents", {}).get(role) or request["agent"] for role in ROLES
+            role: request.get("agents", {}).get(role) or request["agent"] for role in roles
         }
         if any(
             not spec or spec.partition("/")[0].partition("@")[0] == "codex"
@@ -120,17 +180,11 @@ def _work(job_id: str) -> None:
         automatic = default_agent() if any(not spec for spec in assignments.values()) else ""
         assignments = {role: spec or automatic for role, spec in assignments.items()}
         update(agents=assignments)
-        chosen = "read_only_workflow" if request["read_only"] else "dynamic_workflow"
         run = Hmz(request["workspace"]).run(
-            f"{path / 'workflow.py'}:{chosen}",
+            f"{source}:{chosen}",
             request["task"],
             agents=assignments,
-            params={
-                "mode": request["mode"],
-                "max_rounds": request["max_rounds"],
-                "artifacts": str(path),
-                "guidance": request.get("guidance", ""),
-            },
+            params=params,
             budget=request["budget"],
             resume=request.get("resume_epic", False),
             backup=[],
@@ -170,6 +224,7 @@ def _work(job_id: str) -> None:
             "complete",
             "blocked",
             "round_limit",
+            "needs_work",
         }:
             update(status=run.result["status"], result=run.result)
         else:
@@ -194,11 +249,11 @@ def _work(job_id: str) -> None:
             run.close()
             run.wait(10)
         finished.set()
-        update(finished=time.time())
+        update(finished=time.time(), active_agents=[])
         if state["status"] == "complete" and request.get("retain_flow", True):
             try:
                 profile = Library(data_root()).retain(job_id)
-                update(retained_flow=profile["name"])
+                update(retained_flow=profile["name"], retention_class="candidate")
                 event("flow_retained", name=profile["name"], successes=profile["successes"])
             except Exception as error:
                 # A library failure must not change an already reviewed task outcome.
