@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Humanize · 工作状态</title>
+<style>
+:root{color-scheme:dark;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:#10151b;color:#e3eaf3}
+*{box-sizing:border-box}body{margin:0}main{max-width:1120px;margin:auto;padding:48px 28px}header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:36px}
+h1{font-size:30px;letter-spacing:-1px;margin:0 0 9px}p{color:#97a8bc;font-size:14px;line-height:1.6;margin:0}.live{font-size:12px;color:#78d6b4;white-space:nowrap}.live:before{content:'●';margin-right:9px}
+article{border:1px solid #2b3848;border-radius:16px;background:#17202b;padding:26px;margin-bottom:18px}.top{display:flex;gap:16px;align-items:center;justify-content:space-between}code{font-family:ui-monospace,monospace;font-size:12px;color:#9bb0c9;word-break:break-all}.badge{border-radius:20px;padding:5px 12px;font-size:12px;background:#24384a;color:#99cfff}.badge.complete{background:#203f37;color:#8ce1ba}.badge.failed,.badge.lost,.badge.blocked{background:#4a3035;color:#f0a5ac}
+.path{margin-top:10px;font-size:13px;word-break:break-all}.stage{font-size:22px;margin:23px 0 8px;font-weight:600}.steps{display:flex;gap:8px;margin:20px 0}.step{height:4px;background:#2d3b4b;flex:1;border-radius:3px}.step.on{background:#79cbb9}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;border-top:1px solid #2b3848;padding-top:20px;margin-top:20px}.label{color:#91a3b9;font-size:12px;margin-bottom:8px}.value{font-size:18px}.models{margin-top:22px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.models .value{font-size:12px;font-family:ui-monospace,monospace;word-break:break-all}.evidence{margin-top:20px;border-top:1px solid #2b3848;padding-top:16px;white-space:pre-wrap;font-size:13px;color:#bdcddd;line-height:1.7}.foot{font-size:12px;color:#6d839b;margin-top:30px}.empty{padding:50px;border:1px dashed #364558;border-radius:16px;text-align:center}#connection{color:#e4b178;margin-bottom:18px;min-height:20px;font-size:13px}
+@media(max-width:650px){main{padding:28px 16px}.metrics{grid-template-columns:repeat(2,1fr)}.models{grid-template-columns:1fr}header{align-items:flex-start}.top{align-items:flex-start}article{padding:20px}}
+</style>
+<main><header><div><h1>Humanize <span style="color:#78c9b6">/</span> 工作状态</h1><p>动态规划、执行和独立审查的实时进度</p></div><span class="live" id="live">每秒更新 · 只读</span></header>
+<div id="connection" role="status"></div><section id="jobs" aria-live="polite"></section>
+<p class="foot">仅监听本机 · 不显示任务原文与会话记录 · 轮数与预算表示边界，不代表完成百分比</p></main>
+<script>
+const names={starting:'正在启动',running:'运行中',planning:'规划',acting:'执行与验证',reviewing:'独立审查',fix:'准备修复',replan:'准备重新规划',complete:'审查通过',blocked:'需要输入',round_limit:'达到轮数限制',budget_exceeded:'预算耗尽',cancelled:'已取消',failed:'运行失败',lost:'心跳丢失'};
+const node=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e};
+const duration=s=>{s=Math.max(0,Math.round(s||0));return `${Math.floor(s/60)}m ${s%60}s`};
+function metric(label,value){const el=node('div');el.append(node('div','label',label),node('div','value',value));return el}
+function card(j){const a=node('article'),top=node('div','top'),p=j.progress||{},u=j.usage||{};
+top.append(node('code','',j.job_id),node('span','badge '+j.status,names[j.status]||j.status));a.append(top,node('p','path',j.workspace));
+const active=['starting','running'].includes(j.status),stage=active?(p.stage||j.status):j.status;
+a.append(node('div','stage',names[stage]||stage),node('p','',p.message||'等待工作流事件…'));const report=j.report||{};if(report.status==='ready'){a.append(node('div','evidence',`状态播报 agent：${report.summary}\n下一步：${report.next_step}${report.for_revision!==p.revision?(active?'（新阶段摘要更新中）':'（结束前的最后播报）'):''}`))}else if(report.status==='unavailable'){a.append(node('p','path','状态播报 agent 暂不可用；运行时进度继续更新。'))}
+const steps=node('div','steps'),order=['planning','acting','reviewing'];for(const s of order)steps.append(node('span','step'+(p.stage===s?' on':'')));a.append(steps);
+const metrics=node('div','metrics');metrics.append(metric('当前轮次',`${p.round||0} / ${p.max_rounds||'—'}`),metric('已运行',duration(j.elapsed_seconds)),metric('剩余时间预算',duration(j.remaining_seconds)),metric('输出 token',`${u.output_tokens||0} / ${j.budget.output_tokens}`));a.append(metrics);
+const models=node('div','models');for(const [r,label] of [['planner','规划者'],['actor','执行者'],['reviewer','审查者'],['observer','状态播报者']])models.append(metric(label,(j.agents||{})[r]||'启动后解析'));a.append(models);
+const last=j.last_activity;if(last)a.append(node('p','path',`最近活动：${last.kind}${last.role?' · '+last.role:''} · ${duration(Date.now()/1000-last.at)}前`));
+if(j.evidence&&j.evidence.length)a.append(node('div','evidence',j.evidence.join('\n')));
+if(j.retained_flow)a.append(node('p','path',`已积累到本地 flow 库：${j.retained_flow}`));return a}
+let previous='';async function refresh(){try{const response=await fetch('api',{cache:'no-store'});if(!response.ok)throw Error(response.status);const data=await response.json();document.getElementById('connection').textContent='';document.getElementById('live').textContent='每秒更新 · '+new Date().toLocaleTimeString();const signature=JSON.stringify(data);if(signature!==previous){const area=document.getElementById('jobs');area.replaceChildren(...(data.jobs.length?data.jobs.map(card):[node('p','empty','还没有工作流。启动任务后，进度会显示在这里。')]));previous=signature}}catch(e){document.getElementById('connection').textContent='连接暂时中断，正在重试。已显示的数据可能过期。'}finally{setTimeout(refresh,1000)}}refresh();
+</script></html>

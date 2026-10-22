@@ -1,0 +1,12 @@
+{
+  "name": "humanfia-humanize",
+  "version": "0.2.0",
+  "description": "Humanfia Humanize dynamic workflows for Codex",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Humanfia Humanize",
+    "shortDescription": "Adaptive plan, implement, review and repair",
+    "category": "Developer Tools"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "humanfia-humanize",
+  "version": "0.2.0",
+  "description": "Humanize adaptive workflows for Codex and DeepSeek Harness, with a flow-owned status observer and reusable flow library.",
+  "license": "Apache-2.0",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/setup/SKILL.md",
+      "interface": {
+        "displayName": "Humanfia Humanize",
+        "shortDescription": "Dynamic planning and build–review loops for Codex",
+        "longDescription": "Drive the real Humanfia Humanize runtime from Codex: adaptive planning, persistent implementation sessions, fresh independent reviews, steering, cancellation, resumption, and local traces.",
+        "developerName": "zgdllt",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Humanfia Humanize to complete this task with a dynamic workflow."
+        ]
+      }
+    }
+  },
+  "repository": "https://github.com/zgdllt/humanize_codex",
+  "homepage": "https://github.com/zgdllt/humanize_codex",
+  "author": {
+    "name": "zgdllt"
+  }
+}

@@ -1,0 +1,10 @@
+Humanfia Humanize Codex integration
+
+This local integration uses the Humanfia Humanize runtime (hmz), licensed under Apache-2.0.
+Humanize upstream: https://github.com/humanfia/humanize
+Project website: https://humanfia.ai/projects/humanize
+Upstream copyright: Humanfia and its contributors.
+
+The Codex integration, MCP tools, durable job wrapper and adaptive flow in this package
+are new integration code. This package is not an official Humanfia or OpenAI distribution.
+Upstream research claims and benchmark results are not claims about this plugin.

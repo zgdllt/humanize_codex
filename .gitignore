@@ -1,0 +1,17 @@
+.venv/
+.runtime/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+output/
+.env
+.env.*
+!.env.example
+*.log
+*.jsonl
+.hmz/
+.dsh/
+.credentials*
+.DS_Store
