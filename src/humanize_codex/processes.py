@@ -27,6 +27,17 @@ class ProcessTree:
             except psutil.NoSuchProcess:
                 pass
 
+    def add(self, pid: int, created: float) -> None:
+        try:
+            process = psutil.Process(pid)
+            if process.create_time() == created:
+                self.owned[pid] = process
+        except psutil.NoSuchProcess:
+            pass
+
+    def release(self, pid: int) -> None:
+        self.owned.pop(pid, None)
+
     def close(self, *, timeout: float = 5) -> None:
         # Stop spawning first, then discover descendants that appeared during the scan.
         suspended = set()

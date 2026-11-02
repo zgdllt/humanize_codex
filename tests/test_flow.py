@@ -22,7 +22,6 @@ def verdict(action, notes="Concrete feedback"):
 
 
 def run(tmp_path, actor, reviewer, planner=None, **params):
-    observer = params.pop("observer", REPORT)
     return asyncio.run(
         fakes.run_fake(
             f"{FLOW}:dynamic_workflow",
@@ -31,7 +30,6 @@ def run(tmp_path, actor, reviewer, planner=None, **params):
                 "actor": actor,
                 "reviewer": reviewer,
                 "planner": planner or PLAN,
-                "observer": observer,
             },
             params={"artifacts": str(tmp_path), **params},
         )
@@ -93,7 +91,6 @@ def test_read_only_variant_runs_on_real_engine(tmp_path):
                 "planner": PLAN,
                 "actor": "Explanation",
                 "reviewer": verdict("complete"),
-                "observer": REPORT,
             },
             params={"artifacts": str(tmp_path)},
         )
@@ -116,7 +113,6 @@ def test_journal_resume_preserves_progress_and_original_goal(tmp_path):
                 "planner": PLAN,
                 "actor": "Attempt",
                 "reviewer": verdict("fix"),
-                "observer": REPORT,
             },
         )
     )
@@ -130,7 +126,6 @@ def test_journal_resume_preserves_progress_and_original_goal(tmp_path):
                 "planner": planner,
                 "actor": actor,
                 "reviewer": verdict("complete"),
-                "observer": REPORT,
             },
         )
     )
@@ -147,7 +142,6 @@ def test_journal_resume_preserves_progress_and_original_goal(tmp_path):
                     "planner": PLAN,
                     "actor": "x",
                     "reviewer": verdict("complete"),
-                    "observer": REPORT,
                 },
             )
         )

@@ -21,9 +21,6 @@ def drivers(review=DONE):
         "first": fakes.FakeAgentDriver("codex", reply="one"),
         "second": fakes.FakeAgentDriver("codex", reply="two"),
         "humanize_verifier": fakes.FakeAgentDriver("codex", reply=review),
-        "humanize_observer": fakes.FakeAgentDriver(
-            "codex", reply={"summary": "Checking active roles", "next_step": "Verify"}
-        ),
     }
 
 
@@ -52,7 +49,6 @@ def test_arbitrary_shapes_under_managed_verification(tmp_path, entry, params, ex
     )
     assert result["status"] == "complete"
     assert all(result["flow_result"][key] == value for key, value in expected.items())
-    assert read_json(tmp_path / "report.json")["status"] == "ready"
 
 
 def test_parallel_roles_really_overlap_instead_of_serial_execution(tmp_path):

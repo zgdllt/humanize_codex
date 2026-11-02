@@ -6,7 +6,7 @@ description: Set up or diagnose the Humanfia Humanize Codex plugin, its Python r
 # Set up Humanfia Humanize
 
 1. Call the plugin's `humanize_doctor` tool. Check the hmz version, MCP version, Python and
-   `codex` path and DSH SDK/auth readiness. Pure DSH jobs do not require a Codex CLI. Do not print, copy or rewrite credential values. DSH readiness is reported as a boolean.
+   `codex` path, Humanize app/tmux availability, and DSH SDK/auth readiness. Pure DSH jobs do not require a Codex CLI. Do not print, copy or rewrite credential values. DSH readiness is reported as a boolean.
 2. The plugin launcher uses `uv` and a pinned environment from `uv.lock`; it leaves the user's
    existing hmz installation intact. Python 3.14 is selected for the tested dependency set.
    The first launch may download dependencies. If `uv` is missing, inspect the official
@@ -22,3 +22,5 @@ description: Set up or diagnose the Humanfia Humanize Codex plugin, its Python r
 Use the workflow skill for execution and the author-flow skill for custom Python workflows.
 This is the Humanfia project at https://humanfia.ai/projects/humanize, not the legacy RLCR
 skill bundle. Source: https://github.com/humanfia/humanize. License: Apache-2.0.
+
+Desktop runs open the installed Humanize app. SSH or terminal runs require tmux and use the upstream Humanize TUI bound to the job host. If tmux is missing, report it before starting a flow.

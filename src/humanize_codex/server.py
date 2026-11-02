@@ -39,11 +39,12 @@ def humanize_catalog() -> dict[str, Any]:
         "harnesses": ["codex", "dsh"],
         "custom": "flow_file + entrypoint + flow_params: arbitrary Python sequence, loop, "
         "branch, parallel and nested flows with declared role names",
-        "builtin_role_overrides": ["planner", "actor", "reviewer", "observer"],
-        "custom_manager_roles": ["humanize_verifier", "humanize_observer"],
+        "builtin_role_overrides": ["planner", "actor", "reviewer"],
+        "custom_manager_roles": ["humanize_verifier"],
         "flow_library": "Reviewed successes enter the candidate pool; curated reuse requires "
         "applicability assessment and at least two passing structural test cases",
-        "live_status": "A flow-owned observer narrates the dashboard; runtime records the facts",
+        "live_status": "The native Humanize app or a named tmux TUI session shows "
+        "actual flow/agent/tool events",
         "custom_verification": "Unfinished custom output ends as needs_work. Choose a new bounded "
         "run from the evidence; resume is supported only when the authored flow declares it",
         "defaults": {"max_rounds": 6, "duration_seconds": 1800, "output_tokens": 50000},
@@ -86,9 +87,11 @@ def humanize_run(
     Calls the real Humanize engine in a durable worker. Only one workflow may write or
     inspect this workspace at a time. Use read_only for review/analysis-only tasks.
     Leave agent empty to follow local Codex; explicit models never silently fall back.
-    Without entrypoint, use the builtin adaptive four-role template. With flow_file and
+    Without entrypoint, use the builtin adaptive planner/actor/reviewer template. With flow_file and
     entrypoint, run an authored Python flow with its own roles, parameters and control
-    structure; independent verification and status agents are added by the manager.
+    structure; independent verification is added by the manager. The native app/TUI opens
+    automatically;
+    share its workspace/epic or tmux session and attach command with the user.
     A custom flow that fails verification ends as needs_work; choose the next bounded run
     from its evidence. Resume requires an explicitly resumable authored flow.
     Completed reviewed flows enter the local candidate pool; success alone is not curation.
@@ -132,8 +135,8 @@ async def humanize_wait(
     """Wait for a stage revision or completion, sending MCP progress every five seconds.
 
     Use the last returned revision as after_revision to wake on a meaningful state change.
-    Chat clients may hide protocol notifications; also share the dashboard URL and give
-    concise stage updates. A notification is not completion evidence.
+    Chat clients may hide protocol notifications; share the native viewer or tmux session
+    returned by humanize_run. A notification is not completion evidence.
     """
     if not math.isfinite(seconds) or not 0 <= seconds <= 60:
         raise ValueError("seconds must be between 0 and 60")
@@ -163,17 +166,18 @@ async def humanize_wait(
         await asyncio.sleep(min(0.2, max(0, deadline - time.monotonic())))
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
-def humanize_dashboard(job_id: str = "") -> dict[str, Any]:
-    """Get a private loopback URL for a continuously refreshed, read-only progress dashboard."""
-    from .dashboard import ensure_dashboard
+@mcp.tool()
+def humanize_open(job_id: str) -> dict[str, Any]:
+    """Open the native Humanize app, or return/recreate this job's tmux TUI session.
 
-    if job_id:
-        Jobs().status(job_id)
-    result = ensure_dashboard()
-    if job_id:
-        result["url"] += "?job=" + job_id
-    return result
+    Opens the existing run; it does not execute the flow again. For tmux, share the returned
+    session name and attach command with the user. The native UI shows real agent/tool events.
+    """
+    from .store import job_path
+    from .viewer import reopen
+
+    state = Jobs().status(job_id)
+    return reopen(job_path(data_root(), job_id), state["request"])
 
 
 @mcp.tool(annotations={"readOnlyHint": True})

@@ -105,7 +105,7 @@ class Library:
             "agents": state.get("agents")
             or {
                 role: request.get("agents", {}).get(role) or request["agent"]
-                for role in request.get("role_names", ("planner", "actor", "reviewer", "observer"))
+                for role in request.get("role_names", ("planner", "actor", "reviewer"))
             },
         }
         if request.get("entrypoint"):

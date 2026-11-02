@@ -54,7 +54,7 @@ def test_accepts_mixed_and_provider_role_specs(tmp_path):
         agent="codex/gpt-6.1-sol:high",
         agents={
             "actor": "dsh/deepseek-v4-pro:high",
-            "observer": "dsh@personal/deepseek-v4-flash:low",
+            "reviewer": "dsh@personal/deepseek-v4-flash:low",
         },
     )
     assert request["agents"]["actor"].startswith("dsh/")

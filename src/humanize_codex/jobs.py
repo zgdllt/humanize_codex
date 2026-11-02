@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -28,7 +29,7 @@ from .store import (
 
 DEFAULT_AGENT = ""
 FLOW = Path(__file__).with_name("flow.py")
-ROLES = ("planner", "actor", "reviewer", "observer")
+ROLES = ("planner", "actor", "reviewer")
 
 
 def validate_agent(spec: str) -> str:
@@ -61,6 +62,8 @@ def doctor(workspace: str | None = None) -> dict[str, Any]:
         dsh["native_auth_ready"] = native_ready(workspace or Path.cwd())
     except importlib.metadata.PackageNotFoundError:
         dsh = {"sdk_version": None, "error": "Install the pinned hmz[dsh] dependencies"}
+    from .viewer import app_path
+
     return {
         "plugin_version": importlib.metadata.version("humanfia-humanize-codex"),
         "hmz_version": importlib.metadata.version("hmz"),
@@ -72,6 +75,10 @@ def doctor(workspace: str | None = None) -> dict[str, Any]:
         "data_directory": str(data_root()),
         "nested_run": os.environ.get("HUMANIZE_CODEX_CHILD") == "1",
         "platform": sys.platform,
+        "native_interface": {
+            "app": str(app_path() or ""),
+            "tmux": shutil.which("tmux"),
+        },
     }
 
 
@@ -116,11 +123,13 @@ def prepare(
         or any(
             not isinstance(role, str)
             or not role.isidentifier()
-            or (not entrypoint and role not in ROLES)
+            or (not entrypoint and not flow_file and role not in ROLES)
             for role in agents
         )
     ):
-        raise ValueError("Use declared role names (up to 32); builtin flows use their four roles")
+        raise ValueError(
+            "Use declared role names (up to 32); builtin roles are planner/actor/reviewer"
+        )
     for spec in (agents or {}).values():
         validate_agent(spec)
     if flow_file:
@@ -178,7 +187,6 @@ class Jobs:
             state = {**state, "status": "lost", "error": "Worker heartbeat expired"}
         request = read_json(path / "request.json")
         progress = read_json(path / "progress.json") if (path / "progress.json").is_file() else {}
-        report = read_json(path / "report.json") if (path / "report.json").is_file() else {}
         retention = state.get("retention_class")
         if state.get("retained_flow"):
             try:
@@ -189,7 +197,6 @@ class Jobs:
         return {
             **state,
             "progress": progress,
-            "report": report,
             "retention_class": retention,
             "elapsed_seconds": round(elapsed, 1),
             "remaining_seconds": round(max(0, request["budget"]["duration"] - elapsed), 1),
@@ -225,6 +232,7 @@ class Jobs:
         return [self.status(job_id, include_trace=include_trace) for _, job_id in records]
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
+        request = {k: v for k, v in request.items() if k not in {"native", "viewer"}}
         if os.environ.get("HUMANIZE_CODEX_CHILD") == "1":
             raise ValueError("A Humanize worker cannot launch another Humanize workflow")
         # Resolve actual declared roles/backends in the worker, before any model turn.
@@ -253,18 +261,27 @@ class Jobs:
                 },
             )
             env = {**os.environ, "HUMANIZE_CODEX_DATA": str(self.root)}
+            created_host = None
             try:
-                with (path / "worker.log").open("ab") as log:
-                    subprocess.Popen(
-                        [sys.executable, "-m", "humanize_codex.cli", "worker", job_id],
-                        cwd=request["workspace"],
-                        env=env,
-                        stdin=subprocess.DEVNULL,
-                        stdout=log,
-                        stderr=log,
-                        start_new_session=True,
-                    )
-            except OSError as error:
+                from . import native, viewer
+
+                request["viewer"] = viewer.describe(request["workspace"], job_id)
+                request["native"] = native.prepare_host(request["workspace"], job_id)
+                created_host = request["native"]
+                atomic_json(path / "request.json", request)
+                state = read_json(path / "state.json")
+                atomic_json(
+                    path / "state.json",
+                    {**state, "native": request["native"], "viewer": request["viewer"]},
+                )
+                shown = viewer.launch(path, request, env)
+                state = read_json(path / "state.json")
+                atomic_json(path / "state.json", {**state, "viewer": shown})
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                if created_host:
+                    host = native.owned_host(request["workspace"], created_host)
+                    if host is not None:
+                        host.stop()
                 state = read_json(path / "state.json")
                 atomic_json(
                     path / "state.json",
@@ -291,11 +308,8 @@ class Jobs:
                 raise ValueError(f"Job is already {state['status']}")
             if kind == "steer" and state["status"] == "cleaning_up":
                 raise ValueError("Job is cleaning up; steering can no longer reach its agents")
-            if role and (
-                role not in state.get("agents", {})
-                or role in {"observer", "humanize_observer", "humanize_verifier"}
-            ):
-                raise ValueError("Select an active custom task role, not a manager/observer role")
+            if role and (role not in state.get("agents", {}) or role == "humanize_verifier"):
+                raise ValueError("Select an active task role, not the independent verifier")
             atomic_json(
                 path / "inbox" / f"{time.time_ns()}-{ticket}.json",
                 {
@@ -369,7 +383,8 @@ class Jobs:
             agents={
                 k: v
                 for k, v in {**settings["agents"], **(agents or {})}.items()
-                if settings.get("entrypoint") or k not in {"humanize_verifier", "humanize_observer"}
+                if k != "humanize_observer"
+                and (settings.get("entrypoint") or k != "humanize_verifier")
             },
             duration_seconds=duration_seconds,
             output_tokens=output_tokens,

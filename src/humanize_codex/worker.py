@@ -81,13 +81,9 @@ def _work(job_id: str) -> None:
             if (
                 request.get("entrypoint")
                 and kind in {"begins", "ends"}
-                and role not in {"humanize_observer", "humanize_verifier"}
+                and role != "humanize_verifier"
             ):
-                running = [
-                    x["role"]
-                    for x in active.values()
-                    if x["role"] not in {"humanize_observer", "humanize_verifier"}
-                ]
+                running = [x["role"] for x in active.values() if x["role"] != "humanize_verifier"]
                 atomic_json(
                     path / "progress.json",
                     {
@@ -167,9 +163,11 @@ def _work(job_id: str) -> None:
                 "inputs": request.get("flow_params", {}),
                 "artifacts": str(path),
                 "guidance": request.get("guidance", ""),
-                "max_rounds": request["max_rounds"],
             }
             update(flow=info)
+        else:
+            declared = Hmz(request["workspace"]).flows.declared(f"{source}:{chosen}")
+            roles = [role.name for role in declared.agents if not role.auto]
         assignments = {
             role: request.get("agents", {}).get(role) or request["agent"] for role in roles
         }
@@ -187,20 +185,29 @@ def _work(job_id: str) -> None:
         automatic = default_agent() if any(not spec for spec in assignments.values()) else ""
         assignments = {role: spec or automatic for role, spec in assignments.items()}
         update(agents=assignments)
-        run = Hmz(request["workspace"]).run(
-            f"{source}:{chosen}",
-            request["task"],
-            agents=assignments,
-            params=params,
-            budget=request["budget"],
-            resume=request.get("resume_epic", False),
-            backup=[],
-        )
+        options = {
+            "agents": assignments,
+            "params": params,
+            "budget": request["budget"],
+            "resume": request.get("resume_epic", False),
+            "backup": [],
+        }
+        if request.get("native"):
+            from .native import NativeRun
+
+            run = NativeRun(
+                request["workspace"], path, f"{source}:{chosen}", request["task"], **options
+            )
+        else:
+            # Finish handles created by older plugin versions, which used a local SDK run.
+            run = Hmz(request["workspace"]).run(f"{source}:{chosen}", request["task"], **options)
         run.watch(watch)
         run.opened(opened)
         run.noticed(lambda text: event("notice", text=text))
         control(run)
         run.start()
+        if request.get("native"):
+            update(native={**request["native"], "run": run.number})
         update(status="running")
         began = time.monotonic()
         forced_budget = False
@@ -221,7 +228,7 @@ def _work(job_id: str) -> None:
                 },
             )
         error = run.raised
-        if cancel.is_set():
+        if cancel.is_set() or isinstance(error, asyncio.CancelledError):
             update(status="cancelled")
         elif forced_budget or isinstance(error, BudgetExceeded):
             update(status="budget_exceeded", error=str(error or "Wall-clock limit reached"))
@@ -255,6 +262,9 @@ def _work(job_id: str) -> None:
         if run is not None and run.running:
             run.close()
             run.wait(10)
+        if request.get("native") and run is not None:
+            state["native_finished"] = run.native_finished
+            run.detach()
         finished.set()
         if supervised:
             update(status="cleaning_up", active_agents=[])

@@ -31,10 +31,12 @@ def test_protocol_and_tools(tmp_path):
                 "humanize_steer",
                 "humanize_resume",
                 "humanize_doctor",
+                "humanize_open",
                 "humanize_inspect_flow",
                 "humanize_validate_flow",
                 "humanize_curate_flow",
             } <= names
+            assert "humanize_dashboard" not in names
             health = await client.call_tool("humanize_doctor", {})
             assert not health.isError
             catalog = await client.call_tool("humanize_catalog", {})

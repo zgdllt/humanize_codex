@@ -20,15 +20,17 @@ join, nested flows, or combinations. Do not force every task into an actor/revie
    and flow_params for its inputs. The two built-in dynamic/review modes remain conveniences.
    They are templates, not the definition of dynamic workflow. For a simple candidate trial,
    allow_candidate=true is an explicit choice, not a claim that it has been curated.
-4. The manager adds independent verification and a separate status observer to generic flows.
+4. The manager adds independent verification and native app/TUI visibility to generic flows.
    The authored Python decides its own internal sequence, loops, branches and concurrency.
    A verifier finding unfinished work produces needs_work; the manager does not secretly
    replace the authored structure with a repair loop. Decide the next bounded action from
    the evidence. No unapproved scope expansion or overlapping workspace writers.
-5. Open/share `humanize_dashboard` once. The observer owns narration; runtime events show all
-   active role sessions, including parallel work. The execution agents do not maintain the
-   page or poll progress. In the parent, wait up to 60 seconds per call; report required
-   decisions and final outcomes instead of repeating every stage.
+5. humanize_run opens Humanize app on desktop or starts its official TUI in a named tmux
+   session on SSH/terminal hosts. Immediately tell the user the returned app workspace/epic,
+   or the tmux session and attach_command (switch_command inside tmux). The native UI owns
+   live visibility of flows, agents, tool calls and costs. Do not maintain a dashboard or
+   add a narration observer. humanize_open reopens an existing viewer without rerunning work.
+   Wait at most 60 seconds per call and report required decisions and the final result.
 6. Steer a generic flow by naming its task role. Untargeted guidance is stored for the flow;
    arbitrary Python must explicitly read it if needed. Check delivery receipts. Cancellation
    is complete only at terminal state; do not automatically resume a user-cancelled task.
@@ -40,3 +42,5 @@ join, nested flows, or combinations. Do not force every task into an actor/revie
 
 Keep the original goal, user changes, protected processes and authorization boundaries.
 Respect task-specific budgets. Sub-workflows cannot recursively launch this manager.
+
+Only use a workflow when it offers concrete coordination value; direct work is preferred when faster and cheaper.

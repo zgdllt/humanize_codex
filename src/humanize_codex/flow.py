@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextvars
 import functools
 import hashlib
 import json
@@ -17,7 +15,6 @@ from typing import Literal
 from hmz.flows import (
     Agent,
     AgentCollection,
-    Budget,
     EnvCollection,
     FlowContext,
     FlowParams,
@@ -41,24 +38,16 @@ class Builder(Agent):
     _permission = Permission()
 
 
-class Observer(Agent):
-    """Own status narration in a separate, read-only session."""
-
-    _permission = Permission(local=PermissionKind.READ, online=PermissionKind.NONE)
-
-
 class Agents(AgentCollection):
     planner: Reader
     actor: Builder
     reviewer: Reader
-    observer: Observer
 
 
 class ReadOnlyAgents(AgentCollection):
     planner: Reader
     actor: Reader
     reviewer: Reader
-    observer: Observer
 
 
 class Envs(EnvCollection):
@@ -92,79 +81,6 @@ class Review(BaseModel):
     )
 
 
-class StatusReport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    summary: str = Field(min_length=1, max_length=400)
-    next_step: str = Field(min_length=1, max_length=200)
-
-
-class StatusObserver:
-    """An independent agent consumes coalesced facts while implementation keeps running."""
-
-    def __init__(self, agent, params: Params) -> None:
-        self.agent, self.params = agent, params
-        self.queue = asyncio.Queue(maxsize=1)
-        self.closing = False
-        self.task = asyncio.create_task(self.run())
-
-    def publish(self, facts: dict) -> None:
-        if self.queue.full():
-            self.queue.get_nowait()
-        self.queue.put_nowait(facts)
-
-    async def run(self) -> None:
-        session = await self.agent.spawn()
-        for _ in range(min(3 * self.params.max_rounds + 1, 24)):
-            facts = await self.queue.get()
-            try:
-                report = await self.agent.run(
-                    "You own the live dashboard narration for this workflow. Summarize ONLY "
-                    "the supplied runtime facts, in the user's language (default Chinese). "
-                    "Do not use tools, inspect files, direct other agents or change the task. "
-                    "Never infer successful completion, verification or percentages beyond "
-                    "these facts. Keep each field to one brief sentence.\n"
-                    + json.dumps(facts, ensure_ascii=False),
-                    session=session,
-                    output_schema=StatusReport,
-                    budget=Budget(duration=30, output_tokens=800),
-                )
-                _save(
-                    self.params,
-                    "report.json",
-                    {
-                        **report.model_dump(),
-                        "for_revision": facts["revision"],
-                        "updated": time.time(),
-                        "role": "observer",
-                        "status": "ready",
-                    },
-                )
-            except Exception as error:
-                _save(
-                    self.params,
-                    "report.json",
-                    {
-                        "status": "unavailable",
-                        "role": "observer",
-                        "updated": time.time(),
-                        "error_type": type(error).__name__,
-                        "error": str(error)[:1000],
-                    },
-                )
-                return
-            if self.closing and self.queue.empty():
-                return
-
-    async def close(self) -> None:
-        self.closing = True
-        # Status work must never hold up task completion or require the parent's attention.
-        done, _ = await asyncio.wait({self.task}, timeout=1)
-        if not done:
-            self.task.cancel()
-        await asyncio.gather(self.task, return_exceptions=True)
-
-
-_observer = contextvars.ContextVar("humanize_status_observer", default=None)
 _startup = threading.Lock()
 
 
@@ -227,19 +143,6 @@ def _progress(params: Params, state, stage: str, role: str, round_no: int, messa
         "updated": time.time(),
     }
     _save(params, "progress.json", facts)
-    if _observer.get() is not None:
-        _observer.get().publish(facts)
-
-
-async def _supervised(task, agents, envs, params, ctx) -> dict:
-    guard_codex_startup()
-    observer = StatusObserver(agents["observer"], params)
-    token = _observer.set(observer)
-    try:
-        return await _execute(task, agents, envs, params, ctx)
-    finally:
-        _observer.reset(token)
-        await observer.close()
 
 
 def _guidance(params: Params) -> str:
@@ -298,7 +201,7 @@ async def _execute(task, agents, envs, params, ctx) -> dict:
             BOUNDARIES + "\nImplement or answer the task and verify the result. Continue through "
             "routine failures. Report actual changes, checks, limitations and any required "
             "human input; do not claim unobserved success. The flow already supplies planning, "
-            "independent review and a status observer: focus on execution and checks. Leave "
+            "independent review: focus on execution and checks. Leave "
             "independent review to the flow's reviewer. Do not maintain dashboards, poll "
             "progress or duplicate coordination work.\n"
             f"Original task:\n{task}\nCurrent plan:\n{json.dumps(plan, ensure_ascii=False)}\n"
@@ -346,7 +249,8 @@ async def dynamic_workflow(
     task: str, *, agents: Agents, envs: Envs, params: Params, ctx: FlowContext
 ) -> dict:
     """Plan, build, independently review, and choose repair, replan, stop or completion."""
-    return await _supervised(task, agents, envs, params, ctx)
+    guard_codex_startup()
+    return await _execute(task, agents, envs, params, ctx)
 
 
 @flow(agents=ReadOnlyAgents, envs=Envs, params=Params, resumable=True)
@@ -354,4 +258,5 @@ async def read_only_workflow(
     task: str, *, agents: ReadOnlyAgents, envs: Envs, params: Params, ctx: FlowContext
 ) -> dict:
     """The same adaptive loop with read-only actors, planners and reviewers."""
-    return await _supervised(task, agents, envs, params, ctx)
+    guard_codex_startup()
+    return await _execute(task, agents, envs, params, ctx)

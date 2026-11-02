@@ -5,7 +5,7 @@ description: Draft and test task-specific Humanize Python flows with arbitrary r
 
 # Author a flow for the task
 
-Draft an ordinary async Python program using hmz.flows. Do not copy a four-role review loop
+Draft an ordinary async Python program using hmz.flows. Do not copy a fixed review loop
 unless it fits the task. The local manager accepts a self-contained .py file and one chosen
 @flow entrypoint, its declared role names and its own FlowParams schema.
 
@@ -25,13 +25,14 @@ unless it fits the task. The local manager accepts a self-contained .py file and
    specify task, agents, params and nonempty expected output fields. Exercise meaningful
    alternate branches, loop termination and fanout/join, not just repeated happy paths.
 4. Start with humanize_run(flow_file=..., entrypoint=..., flow_params=..., agents=...). The
-   manager adds reserved humanize_verifier and humanize_observer roles; their assignments may
+   manager adds reserved humanize_verifier role; its assignment may
    be overridden. It does not constrain the target flow's other roles or Python control flow.
    Do not use reserved names in the authored collection. Results may have any Python shape;
    the independent verifier checks actual outcomes before the outer run can claim complete.
-5. The observer consumes runtime activity outside the execution agents' contexts. Do not
-   delegate dashboard maintenance or log polling to the task's main agent. The program records
-   concurrent active sessions even while narration is delayed or unavailable.
+5. Humanize app/TUI displays the real native run directly. Do not add an observer for
+   progress summaries or build a dashboard. SSH/terminal runs have a named tmux session;
+   share its attach command with the user. Every job has its own native host slot, keeping
+   cancellation separate from the user's other runs.
 6. A reviewed success creates a candidate. To promote a reusable recipe, inspect its code,
    parameterization, applicability, failure modes and existing alternatives. Run at least two
    meaningful validation cases for its exact retained source/entry. Curate with rationale,

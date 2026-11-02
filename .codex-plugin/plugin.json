@@ -1,12 +1,12 @@
 {
   "name": "humanfia-humanize",
-  "version": "0.3.1",
-  "description": "Task-shaped Humanize Python workflows for Codex and DSH, with independent status and a curated flow library.",
+  "version": "0.4.0",
+  "description": "Native Humanize app and tmux TUI workflows for Codex and DSH, with reusable Python flows.",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Humanfia Humanize",
-    "shortDescription": "Adaptive Python flows, parallel roles and curated reuse",
+    "shortDescription": "Dynamic flows with the native Humanize app or tmux TUI",
     "category": "Developer Tools"
   }
 }

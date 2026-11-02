@@ -15,9 +15,11 @@ from .store import TERMINAL, data_root
 def main() -> None:
     parser = argparse.ArgumentParser(description="Humanfia Humanize Codex plugin")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("serve", "doctor", "list", "library", "dashboard", "dashboard-worker"):
+    for name in ("serve", "doctor", "list", "library"):
         sub.add_parser(name)
     for name in (
+        "tui",
+        "open",
         "worker",
         "execute-worker",
         "status",
@@ -82,10 +84,10 @@ def main() -> None:
 
         _work(args.job_id)
         return
-    if args.command == "dashboard-worker":
-        from .dashboard import serve_dashboard
+    if args.command == "tui":
+        from .native import tui
 
-        serve_dashboard()
+        tui(args.job_id)
         return
     if args.command == "inspect-worker":
         from .custom import _inspect_flow
@@ -156,10 +158,11 @@ def main() -> None:
             args.duration,
             allow_candidate=args.allow_candidate,
         )
-    elif args.command == "dashboard":
-        from .dashboard import ensure_dashboard
+    elif args.command == "open":
+        from .store import job_path
+        from .viewer import reopen
 
-        result = ensure_dashboard()
+        result = reopen(job_path(jobs.root, args.job_id), jobs.status(args.job_id)["request"])
     elif args.command == "watch":
         previous, notified = "", 0.0
         while True:

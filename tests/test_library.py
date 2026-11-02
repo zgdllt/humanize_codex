@@ -20,7 +20,6 @@ def promote(library, name):
     agents = {
         "planner": {"steps": ["Read"], "acceptance": ["Verified"], "rationale": "Small"},
         "actor": "Read fixture",
-        "observer": {"summary": "Reading", "next_step": "Review"},
     }
     cases = [
         {
@@ -201,9 +200,6 @@ def test_export_and_real_upstream_index_install(completed, tmp_path, monkeypatch
             agents={
                 "planner": fakes.FakeAgentDriver("codex"),
                 "actor": fakes.FakeAgentDriver("codex", reply="Read fixture"),
-                "observer": fakes.FakeAgentDriver(
-                    "codex", reply={"summary": "Checking", "next_step": "Review"}
-                ),
                 "reviewer": fakes.FakeAgentDriver(
                     "codex",
                     reply={
@@ -283,7 +279,6 @@ def test_promotion_requires_distinct_cases_for_exact_code_and_entry(completed, t
             "agents": {
                 "planner": {"steps": ["read"], "acceptance": ["verified"], "rationale": "check"},
                 "actor": "Checked",
-                "observer": {"summary": "Checking", "next_step": "Review"},
                 "reviewer": {"action": action, "notes": "Checked", "evidence": ["fixture"]},
             },
             "params": {"mode": "review", "max_rounds": 1},
@@ -336,7 +331,7 @@ def test_custom_reuse_preserves_manager_backend_overrides(completed, tmp_path, m
     Library(root).retain(job_id, "custom")
     monkeypatch.setattr(Jobs, "start", lambda self, request: request)
     reused = Jobs(root).reuse("custom", str(tmp_path), "New task", allow_candidate=True)
-    assert reused["agents"]["humanize_observer"] == "dsh/fake:low"
+    assert "humanize_observer" not in reused["agents"]
     assert reused["agents"]["humanize_verifier"] == "dsh/fake:low"
 
 

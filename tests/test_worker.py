@@ -35,15 +35,13 @@ def test_worker_lifecycle_with_real_sdk_and_fake_agents(tmp_path, monkeypatch, c
     class ScriptedRuntime:
         def __init__(self, workspace):
             self.runtime = Hmz(workspace)
+            self.flows = self.runtime.flows
 
         def run(self, *args, **kwargs):
             kwargs["agents"] = {
                 "planner": fakes.FakeAgentDriver("codex"),
                 "actor": actor,
                 "reviewer": reviewer,
-                "observer": fakes.FakeAgentDriver(
-                    "codex", reply={"summary": "Checking fixture", "next_step": "Review"}
-                ),
             }
             return self.runtime.run(*args, **kwargs)
 
@@ -119,7 +117,7 @@ def _scripted_worker(tmp_path, monkeypatch, terminal):
     def runtime(workspace):
         if terminal == "startup_failure":
             raise RuntimeError("injected worker startup failure")
-        return SimpleNamespace(run=lambda *a, **k: run)
+        return SimpleNamespace(run=lambda *a, **k: run, flows=Hmz(workspace).flows)
 
     monkeypatch.setattr("hmz.sdk.Hmz", runtime)
     if terminal == "cancelled":

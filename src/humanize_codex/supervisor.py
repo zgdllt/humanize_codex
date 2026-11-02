@@ -77,6 +77,9 @@ def supervise(job_id: str) -> None:
             env={**os.environ, "HUMANIZE_CODEX_SUPERVISED": job_id},
         )
         tree = ProcessTree(runner.pid)
+        native = request.get("native")
+        if native:
+            tree.add(native["pid"], native["created"])
         deadline = time.monotonic() + request["budget"]["duration"]
         reason, stop_at = "", 0.0
         forced, supervisor_error = False, ""
@@ -95,6 +98,11 @@ def supervise(job_id: str) -> None:
         except Exception as error:
             supervisor_error = f"Supervisor: {type(error).__name__}: {error}"
         finally:
+            outcome_file = path / "outcome.json"
+            if native and not forced and not supervisor_error and outcome_file.is_file():
+                if read_json(outcome_file).get("native_finished"):
+                    # Keep the finished native host available for the user's TUI/app.
+                    tree.release(native["pid"])
             previous_state, cleanup_error = _cleanup(tree, runner, path)
         outcome = path / "outcome.json"
         state = (
@@ -113,7 +121,11 @@ def supervise(job_id: str) -> None:
                     status=reason or "failed",
                     error="Worker process tree stopped after the cleanup grace period"
                     if forced
-                    else f"Worker exited with code {runner.returncode}",
+                    else (
+                        f"Time budget of {request['budget']['duration']:g}s exhausted"
+                        if reason == "budget_exceeded"
+                        else f"Worker exited with code {runner.returncode}"
+                    ),
                 )
             if cleanup_error:
                 state["cleanup_error"] = cleanup_error

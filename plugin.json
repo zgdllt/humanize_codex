@@ -1,16 +1,16 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "humanfia-humanize",
-  "version": "0.3.1",
-  "description": "Task-shaped Humanize Python workflows for Codex and DSH, with independent status and a curated flow library.",
+  "version": "0.4.0",
+  "description": "Native Humanize app and tmux TUI workflows for Codex and DSH, with reusable Python flows.",
   "license": "Apache-2.0",
   "extensions": {
     "com.openai": {
       "onboardingSkill": "./skills/setup/SKILL.md",
       "interface": {
         "displayName": "Humanfia Humanize",
-        "shortDescription": "Adaptive Python flows, parallel roles and curated reuse",
-        "longDescription": "Choose or author sequential, looping, branching, parallel and nested Python workflows as needed. Independent verification, a flow-owned observer, bounded execution and evidence-gated reusable flows.",
+        "shortDescription": "Dynamic flows with the native Humanize app or tmux TUI",
+        "longDescription": "Choose or author Python workflows as needed. The native Humanize app shows desktop runs; SSH and terminal runs open its official TUI in a named tmux session. Includes cancellation, resumption and curated reuse.",
         "developerName": "zgdllt",
         "category": "Developer Tools",
         "capabilities": [
