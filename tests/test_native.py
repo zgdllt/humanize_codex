@@ -235,3 +235,29 @@ def test_ssh_uses_tmux_even_with_a_desktop_app(monkeypatch):
     monkeypatch.setenv("SSH_CONNECTION", "test-ssh-connection")
     monkeypatch.setattr(viewer, "app_path", lambda: Path("/Applications/humanize.app"))
     assert viewer.mode() == "tmux"
+
+
+@pytest.mark.native
+@pytest.mark.parametrize("gui", [False, True])
+def test_piped_mcp_detects_gui_not_the_bundled_cli_path(monkeypatch, gui):
+    from types import SimpleNamespace
+
+    from humanize_codex import viewer
+
+    for key in ("SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT", "TMUX", "TERM_PROGRAM"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(viewer.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(viewer.sys.stdout, "isatty", lambda: False)
+    paths = [
+        "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+    ]
+    paths += ["/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"] if gui else ["/bin/zsh"]
+    monkeypatch.setattr(
+        viewer.psutil,
+        "Process",
+        lambda: SimpleNamespace(
+            parents=lambda: [SimpleNamespace(exe=lambda p=path: p) for path in paths]
+        ),
+    )
+    monkeypatch.setattr(viewer, "app_path", lambda: Path("/Applications/humanize.app"))
+    assert viewer.mode() == ("app" if gui else "tmux")

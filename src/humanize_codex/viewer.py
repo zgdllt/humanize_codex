@@ -31,18 +31,17 @@ def mode() -> str:
         return "tmux"
     if sys.stdin.isatty() or sys.stdout.isatty():
         return "tmux"
-    # MCP stdio is piped in both CLI and desktop. Inspect the actual desktop ancestor.
-    desktop = False
+    if os.environ.get("TERM_PROGRAM"):
+        return "tmux"
+    # MCP stdio is piped in both CLI and desktop. A bundled codex executable can also
+    # be run from a terminal; only the actual GUI ancestor identifies desktop mode.
     for parent in psutil.Process().parents():
         try:
-            if "/Codex.app/" in parent.exe():
-                desktop = True
-                break
+            if parent.exe().endswith(("/Contents/MacOS/Codex", "/Contents/MacOS/ChatGPT")):
+                return "app" if app_path() else "tmux"
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    if not desktop and os.environ.get("TERM_PROGRAM"):
-        return "tmux"
-    return "app" if app_path() else "tmux"
+    return "tmux"
 
 
 def describe(workspace: str, job_id: str) -> dict:
