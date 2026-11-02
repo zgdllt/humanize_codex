@@ -22,15 +22,13 @@ def no_real_cli_detection(monkeypatch):
     [
         {"duration_seconds": float("nan")},
         {"duration_seconds": float("inf")},
-        {"duration_seconds": 0},
+        {"duration_seconds": -1},
         {"cost_usd": -1},
-        {"max_rounds": True},
         {"output_tokens": 1.2},
-        {"mode": "unknown"},
+        {"flow": ""},
         {"agent": "codex/"},
         {"agent": "codex/m,other=value"},
         {"agent": "claude/model"},
-        {"agents": {"unknown": "codex/model"}},
         {"agents": {"actor": "dsh/"}},
         {"agents": {"observer": "dsh/model:medium"}},
         {"flow_file": "relative.py"},
@@ -65,7 +63,7 @@ def test_pure_dsh_does_not_require_codex_and_freezes_source(tmp_path, monkeypatc
         raise AssertionError("A pure DSH job must not inspect Codex")
 
     monkeypatch.setattr("humanize_codex.jobs.select_codex", no_codex)
-    from humanize_codex.jobs import FLOW
+    from flow_fixtures import FLOW
 
     source = tmp_path / "custom.py"
     source.write_bytes(FLOW.read_bytes())
@@ -178,3 +176,38 @@ def test_normal_status_does_not_scan_transcripts_for_dashboard_trace(tmp_path):
     with patch.object(Jobs, "trace", side_effect=AssertionError("unrequested trace scan")):
         assert "trace" not in jobs.status(state["job_id"])
         assert len(jobs.list(limit=1)) == 1
+
+
+def test_unlimited_defaults_and_explicit_budgets_follow_sdk(tmp_path):
+    request = prepare(str(tmp_path), "Task")
+    assert request["flow"] == "rlar"
+    assert request["budget"]["cost"] == "Infinity"
+    assert "duration" not in request["budget"] and "output_tokens" not in request["budget"]
+    assert "mode" not in request and "max_rounds" not in request
+    large = prepare(
+        str(tmp_path), "Task", duration_seconds=172800, output_tokens=20000000, cost_usd=200000
+    )
+    assert large["budget"]["duration"] == 172800
+    assert large["budget"]["output_tokens"] == 20000000
+    assert large["budget"]["cost"] == 200000
+    zero = prepare(str(tmp_path), "Task", duration_seconds=0, output_tokens=0)
+    assert zero["budget"]["duration"] == 0 and zero["budget"]["output_tokens"] == 0
+
+
+def test_resuming_an_official_flow_uses_new_optional_limits(tmp_path):
+    jobs = Jobs(tmp_path / "data")
+    with patch("humanize_codex.jobs.subprocess.Popen"):
+        state = jobs.start(prepare(str(tmp_path), "Task", duration_seconds=1))
+    path = jobs.root / "runs" / state["job_id"] / "state.json"
+    atomic_json(
+        path,
+        {**read_json(path), "status": "cancelled", "epic": "epic-id", "flow": {"resumable": True}},
+    )
+    with patch.object(jobs, "start", side_effect=lambda request: request):
+        resumed = jobs.resume(state["job_id"])
+        assert resumed["budget"]["cost"] == "Infinity"
+        assert "duration" not in resumed["budget"]
+        assert resumed["flow"] == "rlar"
+        limited = jobs.resume(state["job_id"], duration_seconds=2, output_tokens=3)
+        assert limited["budget"]["duration"] == 2
+        assert limited["budget"]["output_tokens"] == 3

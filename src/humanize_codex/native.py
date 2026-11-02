@@ -45,20 +45,57 @@ def prepare_process(artifacts: str) -> None:
     guard_codex_startup()
 
 
-def entry_file(path: Path, source: str) -> Path:
+def entry_file(path: Path, source: str, *, read_only: bool = False) -> Path:
     """The native Host omits return values from its wire protocol; persist one privately."""
-    target = path / "native-entry.py"
+    package = path / "native-flow"
+    package.mkdir(exist_ok=True)
+    from hmz.runtime.flowing import resolved
+
+    original = resolved(source)
+    made = Path(original.fn.__code__.co_filename)
+    origin = (
+        original.home.at
+        if original.home is not None
+        else made.parent
+        if made.name == "__init__.py"
+        else None
+    )
+    if origin is not None and not origin.is_dir():
+        origin = None
+    if origin is not None:
+        for name in ("skills", ".installed.json"):
+            asset = origin / name
+            linked = package / name
+            if asset.exists() and not linked.exists():
+                linked.symlink_to(asset, target_is_directory=asset.is_dir())
+    target = package / "__init__.py"
     target.write_text(
         "from pathlib import Path\n"
-        "from hmz.flows import flow, load\n"
+        "from hmz.flows import AgentCollection, Permission, PermissionKind, flow\n"
+        "from hmz.runtime.flowing import resolved\n"
         "from hmz.sdk import Hmz\n"
         "from humanize_codex.native import prepare_process\n"
         "from humanize_codex.store import atomic_json\n"
         f"prepare_process({str(path)!r})\n"
-        f"target = load({source!r})\n"
+        f"target = resolved({source!r})\n"
         f"declared = Hmz().flows.declared({source!r})\n"
-        f"@flow(name={source.rsplit(':', 1)[-1]!r}, "
-        "agents=target.expected_agents, envs=target.expected_envs, "
+        "roles = target.expected_agents\n"
+        + (
+            "def narrowed(role):\n"
+            "    scopes = {key: min(getattr(role.permission, key), PermissionKind.READ) "
+            "for key in ('local', 'user', 'system')}\n"
+            "    return Permission(**scopes, online=PermissionKind.NONE)\n"
+            "types = {r.name: r.declared if r.auto else "
+            "type(r.declared.__name__, (r.declared,), "
+            "{'_permission': narrowed(r), '__module__': r.declared.__module__}) "
+            "for r in declared.agents}\n"
+            "roles = type('ReadOnlyRoles', (AgentCollection,), {'__annotations__': types, "
+            "'__module__': __name__})\n"
+            if read_only
+            else ""
+        )
+        + "@flow(name=declared.name, "
+        "agents=roles, envs=target.expected_envs, "
         "params=target.expected_params, resumable=declared.resumable)\n"
         "async def codex_workflow(task, *, agents, envs, params, ctx):\n"
         # FlowImpl.fn forwards the validated root context unchanged. A nested
@@ -68,7 +105,7 @@ def entry_file(path: Path, source: str) -> Path:
         "    return value\n",
         encoding="utf-8",
     )
-    return target
+    return package
 
 
 class NativeSession(str):
@@ -84,9 +121,10 @@ class NativeSession(str):
 class NativeRun:
     """Small adapter preserving the worker's callbacks, outcome and control contracts."""
 
-    def __init__(self, workspace, path: Path, source, task, **options):
+    def __init__(self, workspace, path: Path, source, task, *, read_only=False, **options):
         self.path, self.task, self.options = path, task, options
-        self.source = f"{entry_file(path, source)}:{source.rsplit(':', 1)[-1]}"
+        chosen = Hmz(workspace).flows.declared(source).name
+        self.source = f"{entry_file(path, source, read_only=read_only)}:{chosen}"
         native = read_json(path / "request.json")["native"]
         host = owned_host(workspace, native)
         if host is None:

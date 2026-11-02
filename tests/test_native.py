@@ -139,6 +139,7 @@ def test_real_tmux_tui_and_flow_share_host_and_reopen_does_not_rerun(tmp_path, m
             str(tmp_path),
             "Run in tmux",
             flow_file=str(source),
+            entrypoint="read_only_workflow",
             read_only=True,
             retain_flow=False,
             duration_seconds=15,
@@ -174,7 +175,10 @@ def test_real_tmux_tui_and_flow_share_host_and_reopen_does_not_rerun(tmp_path, m
 
 
 @pytest.mark.native
-def test_hard_budget_cleans_only_job_host_not_the_shared_router(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cancel", [False, True])
+def test_budget_or_unlimited_cancel_cleans_only_job_host_not_shared_router(
+    tmp_path, monkeypatch, cancel
+):
     import sys
 
     from humanize_codex import viewer
@@ -208,13 +212,23 @@ def test_hard_budget_cleans_only_job_host_not_the_shared_router(tmp_path, monkey
             str(tmp_path),
             "Blocking Python",
             flow_file=str(source),
-            duration_seconds=1,
+            entrypoint="read_only_workflow",
+            duration_seconds=None if cancel else 1,
             retain_flow=False,
         )
     )
     try:
+        if cancel:
+            deadline = time.monotonic() + 5
+            while (
+                jobs.status(state["job_id"])["status"] == "starting" and time.monotonic() < deadline
+            ):
+                time.sleep(0.05)
+            assert jobs.status(state["job_id"])["status"] == "running"
+            assert jobs.status(state["job_id"])["remaining_seconds"] is None
+            jobs.control(state["job_id"], "cancel")
         state = jobs.wait(state["job_id"], 10)
-        assert state["status"] == "budget_exceeded", state
+        assert state["status"] == ("cancelled" if cancel else "budget_exceeded"), state
         assert not psutil.pid_exists(state["native"]["pid"])
         assert psutil.pid_exists(sentinel.pid)
         assert sentinel_link.asked({"do": "status"})["ok"]

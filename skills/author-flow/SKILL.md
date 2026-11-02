@@ -1,50 +1,41 @@
 ---
 name: humanize-author-flow
-description: Draft and test task-specific Humanize Python flows with arbitrary roles and sequential, looping, branching, parallel or nested control structures when existing workflows do not fit.
+description: Adapt official Humanize flows or author Python flows with task-specific roles and sequential, looping, branching, parallel or nested control structures.
 ---
 
-# Author a flow for the task
+# Start with upstream flows
 
-Draft an ordinary async Python program using hmz.flows. Do not copy a fixed review loop
-unless it fits the task. The local manager accepts a self-contained .py file and one chosen
-@flow entrypoint, its declared role names and its own FlowParams schema.
+Use the installed SDK and official source as the template. Inspect `humanize_catalog` and
+`Hmz(workspace).flows.find(ref)` before drafting. Read the relevant upstream API as needed:
 
-1. Inspect existing curated flows and project conventions. Choose the smallest useful
-   structure; combinations and nested flow calls are allowed. No fixed role names or pair
-   of entrypoints is required. Inspect examples/control_structures.py only when examples
-   of sequence/loop/branch/parallel execution would help.
-2. Declare AgentCollection, local EnvCollection, FlowParams and @flow. Prefer generic Agent
-   role types for Codex/DSH compatibility. Keep agent/model assignments outside the algorithm.
-   Every concurrent turn needs a separate session. Bound loops and concurrency. Parallel
-   writers must use isolated worktrees/environments with defined integration ownership;
-   same-tree parallel analysis should be read-only. Do not provision remote resources unless
-   authorized; this manager binds local environments, while hmz supports broader provisioning.
-3. humanize_inspect_flow imports trusted authored code and returns roles, permissions, input
-   schema and static structure hints. This is not a security sandbox or an inferred graph.
-   humanize_validate_flow executes 1–8 scripted cases through the real fake engine. Cases
-   specify task, agents, params and nonempty expected output fields. Exercise meaningful
-   alternate branches, loop termination and fanout/join, not just repeated happy paths.
-4. Start with humanize_run(flow_file=..., entrypoint=..., flow_params=..., agents=...). The
-   manager adds reserved humanize_verifier role; its assignment may
-   be overridden. It does not constrain the target flow's other roles or Python control flow.
-   Do not use reserved names in the authored collection. Results may have any Python shape;
-   the independent verifier checks actual outcomes before the outer run can claim complete.
-5. Humanize app/TUI displays the real native run directly. Do not add an observer for
-   progress summaries or build a dashboard. SSH/terminal runs have a named tmux session;
-   share its attach command with the user. Every job has its own native host slot, keeping
-   cancellation separate from the user's other runs.
-6. A reviewed success creates a candidate. To promote a reusable recipe, inspect its code,
-   parameterization, applicability, failure modes and existing alternatives. Run at least two
-   meaningful validation cases for its exact retained source/entry. Curate with rationale,
-   use_when and avoid_when. This is an agent assessment backed by evidence, not a benchmark.
-7. Runtime input values are not copied into saved recipes; supply flow_params on reuse as
-   needed. Export curated code as a versioned source bundle and index it with a full Git SHA.
-   Candidates require explicit trial export; the index accepts curated flows only. Never
-   publish task secrets or treat local retention as authorization to push a repository.
-
-Read upstream detail only when needed:
 - https://docs.humanfia.ai/humanize/weaver/writing-a-flow
-- https://docs.humanfia.ai/humanize/weaver/async-flows
-- https://docs.humanfia.ai/humanize/weaver/calling-flows
+- https://docs.humanfia.ai/humanize/reference/flows
 - https://docs.humanfia.ai/humanize/weaver/testing-flows
-- https://docs.humanfia.ai/humanize/weaver/flowverses
+
+1. Choose the smallest useful control structure. Official rlar is suitable when an actor
+   should work until review passes; ralph_loop and stateful_ralph are continuous loops.
+   Reuse an official reference directly when it fits; do not copy its code unnecessarily.
+2. When authoring, use AgentCollection, EnvCollection, FlowParams and @flow. Keep model
+   assignment outside the algorithm. Independent concurrent turns need separate sessions;
+   concurrent writers need separate worktrees and integration ownership. Add loop bounds or
+   per-turn budgets only when the task calls for them. No plugin role names or schemas are
+   imposed. The examples/control_structures.py file illustrates basic Python structures.
+3. `humanize_run(flow_file=..., entrypoint=..., flow_params=..., agents=...)` runs the chosen
+   function directly. Results may have any Python shape. No plugin planner, verifier or
+   execution/review loop is added. Omitted total budgets are unlimited.
+4. The local file interface freezes a self-contained source file. Use an SDK `flow` reference
+   for installed packages or VCS packages with sibling modules and skills. SDK reference
+   resolution and the native bridge preserve the package's skill resources. Flow-declared
+   permissions apply; read_only can restrict local agent roles to reads.
+5. Inspect declarations with humanize_inspect_flow. Use humanize_validate_flow for meaningful
+   alternate branches, loop termination and parallel joins when validating reusable code.
+   These helpers execute trusted Python, not a security sandbox. Match verification to risk;
+   do not invent new gates or tests for simple reversible edits.
+6. The native app/TUI displays real events. Share its returned location and keep chat updates
+   focused on progress, findings and decisions. Custom journal recovery requires
+   resumable=True; preserve the task and its root state across resume.
+7. A normal return is flow completion, not proof of task acceptance. If a custom flow has an
+   actual independent review, it may return status="complete", action="complete" and concrete
+   evidence to qualify for the private candidate pool. Do not fabricate evidence for storage.
+   Promotion additionally assesses applicability and uses at least two passing scenarios
+   for the exact code/entry. Leave task prompts and credentials out of exported source.

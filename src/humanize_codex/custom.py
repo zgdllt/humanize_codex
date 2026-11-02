@@ -56,21 +56,22 @@ def inspect_flow(source: str, entrypoint: str, workspace: str) -> dict:
         return result
 
 
-def _inspect_flow(source: str, entrypoint: str, workspace: str) -> dict:
+def _inspect_flow(source: str, entrypoint: str, workspace: str, *, legacy=False) -> dict:
     """Imports trusted Python via Humanize; this is introspection, not a security sandbox."""
     path = Path(source).expanduser().resolve()
     content = snapshot(path, entrypoint)
     declaration = Hmz(workspace).flows.declared(f"{path}:{entrypoint}")
-    reserved_names = (
-        *RESERVED,
-        "humanize_observer",
-    )  # Retired name stays reserved for old recipes.
-    if any(role.name in reserved_names for role in declaration.agents):
-        raise ValueError(f"Reserved manager role names: {', '.join(reserved_names)}")
-    if len(declaration.agents) > 30:
-        raise ValueError("The local manager supports up to 30 declared task roles")
-    if any(env.name == RESERVED_ENV for env in declaration.envs):
-        raise ValueError(f"Reserved manager environment name: {RESERVED_ENV}")
+    if legacy:
+        reserved_names = (
+            *RESERVED,
+            "humanize_observer",
+        )  # Retired name stays reserved for old recipes.
+        if any(role.name in reserved_names for role in declaration.agents):
+            raise ValueError(f"Reserved manager role names: {', '.join(reserved_names)}")
+        if len(declaration.agents) > 30:
+            raise ValueError("The local manager supports up to 30 declared task roles")
+        if any(env.name == RESERVED_ENV for env in declaration.envs):
+            raise ValueError(f"Reserved manager environment name: {RESERVED_ENV}")
     if any(not env.auto for env in declaration.envs):
         raise ValueError(
             "The local manager requires LocalEnv roles; use hmz for remote provisioning"
@@ -134,7 +135,7 @@ def _inspect_flow(source: str, entrypoint: str, workspace: str) -> dict:
 
 def make_envelope(path: Path, entrypoint: str, read_only: bool) -> tuple[Path, dict]:
     """Freeze the entry's signature and add independent verification."""
-    info = _inspect_flow(str(path / "workflow.py"), entrypoint, str(path))
+    info = _inspect_flow(str(path / "workflow.py"), entrypoint, str(path), legacy=True)
     if read_only and any(role["permission"]["local"] == "all" for role in info["roles"]):
         raise ValueError(
             "read_only requires every custom agent role to declare read-only permission"
@@ -143,7 +144,7 @@ def make_envelope(path: Path, entrypoint: str, read_only: bool) -> tuple[Path, d
     wrapper.write_text(
         "from hmz.flows import AgentCollection, EnvCollection, LocalEnv, flow, load\n"
         "from hmz.sdk import Hmz\n"
-        "from humanize_codex.flow import Reader\n"
+        "from humanize_codex.envelope import Reader\n"
         "from humanize_codex.envelope import EnvelopeParams, execute\n"
         f"target = load({str(path / 'workflow.py') + ':' + entrypoint!r})\n"
         f"declared = Hmz().flows.declared({str(path / 'workflow.py') + ':' + entrypoint!r})\n"

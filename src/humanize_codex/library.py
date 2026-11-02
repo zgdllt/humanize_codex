@@ -42,8 +42,6 @@ def snapshot(source: Path, entrypoint: str = "") -> bytes:
                     )
     if entrypoint and entrypoint not in entries:
         raise ValueError(f"No async flow entrypoint {entrypoint!r}")
-    if not entrypoint and not {"dynamic_workflow", "read_only_workflow"} <= entries:
-        raise ValueError("A managed flow must export dynamic_workflow and read_only_workflow")
     if any(isinstance(node, ast.ImportFrom) and node.level for node in ast.walk(tree)):
         raise ValueError(
             "Managed flows must be self-contained; relative imports cannot be retained"
@@ -96,20 +94,23 @@ class Library:
             )
         if len(description) > 2000:
             raise ValueError("description must be at most 2000 characters")
-        content = snapshot(path / "workflow.py", request.get("entrypoint", ""))
+        entrypoint = request.get("entrypoint") or (
+            state.get("flow", {}).get("name", "") if "flow" in request else ""
+        )
+        content = snapshot(path / "workflow.py", entrypoint)
         source_hash = hashlib.sha256(content).hexdigest()
         settings = {
-            "mode": request["mode"],
             "read_only": request["read_only"],
-            "max_rounds": request["max_rounds"],
             "agents": state.get("agents")
             or {
                 role: request.get("agents", {}).get(role) or request["agent"]
                 for role in request.get("role_names", ("planner", "actor", "reviewer"))
             },
         }
-        if request.get("entrypoint"):
-            settings["entrypoint"] = request["entrypoint"]
+        if "mode" in request:
+            settings.update(mode=request["mode"], max_rounds=request["max_rounds"])
+        if entrypoint:
+            settings["entrypoint"] = entrypoint
         fingerprint = hashlib.sha256(
             (source_hash + json.dumps(settings, sort_keys=True)).encode()
         ).hexdigest()
@@ -289,7 +290,7 @@ class Library:
                 "agents": {
                     role: spec
                     for role, spec in profile["settings"].get("agents", {}).items()
-                    if role not in _RESERVED_ROLES
+                    if "mode" not in profile["settings"] or role not in _RESERVED_ROLES
                 },
             }
             exported["retained_source_sha256"] = exported["source_sha256"]
@@ -380,8 +381,13 @@ def retain_completed(root: Path, job_id: str) -> None:
     """Retain after the owner publishes completion; retention never changes the outcome."""
     path = job_path(root, job_id)
     state = read_json(path / "state.json")
-    if state["status"] != "complete" or not read_json(path / "request.json").get(
-        "retain_flow", True
+    request = read_json(path / "request.json")
+    result = state.get("result", {})
+    if (
+        state["status"] != "complete"
+        or not request.get("retain_flow", True)
+        or result.get("action") != "complete"
+        or not result.get("evidence")
     ):
         return
     try:

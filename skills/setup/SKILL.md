@@ -27,3 +27,7 @@ This is the Humanfia project at https://humanfia.ai/projects/humanize, not the l
 skill bundle. Source: https://github.com/humanfia/humanize. License: Apache-2.0.
 
 Desktop runs open the installed Humanize app. SSH or terminal runs require tmux and use the upstream Humanize TUI bound to the job host. If tmux is missing, report it before starting a flow.
+
+New workflow runs default to the official `rlar` flow. Budget fields are optional and unlimited
+when omitted. Use `humanize_catalog` to discover current upstream flows and roles; the plugin
+has no dynamic/review templates or max_rounds setting. Reconnect after upgrading from 0.4.x.

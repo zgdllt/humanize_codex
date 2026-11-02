@@ -100,8 +100,12 @@ def test_reserved_environment_and_writer_role_are_rejected(tmp_path):
     source.write_text(
         EXAMPLE.read_text().replace("workspace: LocalEnv", "humanize_workspace: LocalEnv")
     )
+    assert (
+        "humanize_workspace"
+        in inspect_flow(str(source), "sequence_flow", str(tmp_path))["environments"]
+    )
     with pytest.raises(ValueError, match="Reserved manager environment"):
-        inspect_flow(str(source), "sequence_flow", str(tmp_path))
+        make_envelope(tmp_path, "sequence_flow", True)
     other = tmp_path / "writer"
     other.mkdir()
     (other / "workflow.py").write_text(
@@ -153,7 +157,7 @@ def test_fake_validation_runs_both_branches_and_checks_expected_output(tmp_path)
     assert bad["status"] == "failed"
 
 
-def test_worker_resolves_custom_roles_and_retains_only_candidate(tmp_path, monkeypatch):
+def test_worker_runs_custom_roles_without_an_injected_verifier(tmp_path, monkeypatch):
     data = tmp_path / "data"
     monkeypatch.setenv("HUMANIZE_CODEX_DATA", str(data))
     monkeypatch.setenv("HUMANIZE_HOME", str(tmp_path / "hmz"))
@@ -165,8 +169,8 @@ def test_worker_resolves_custom_roles_and_retains_only_candidate(tmp_path, monke
             self.flows = self.runtime.flows
 
         def run(self, *args, **kwargs):
-            assert set(kwargs["agents"]) == set(drivers())
-            kwargs["agents"] = drivers()
+            assert set(kwargs["agents"]) == {"first", "second"}
+            kwargs["agents"] = {k: v for k, v in drivers().items() if k != "humanize_verifier"}
             return self.runtime.run(*args, **kwargs)
 
     jobs = Jobs(data)
@@ -187,6 +191,7 @@ def test_worker_resolves_custom_roles_and_retains_only_candidate(tmp_path, monke
         work(state["job_id"])
     actual = jobs.status(state["job_id"])
     assert actual["status"] == "complete", actual.get("error")
-    assert actual["retention_class"] == "candidate"
-    assert actual["flow"]["structures"] == ["sequence", "parallel"]
+    assert actual["result"]["value"] == {"shape": "parallel", "answers": ["one", "two"]}
+    assert actual["retention_class"] is None
+    assert actual["flow"]["roles"] == ["first", "second"]
     assert not actual["active_agents"]

@@ -1,6 +1,6 @@
 {
   "name": "humanfia-humanize",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Native Humanize app and tmux TUI workflows for Codex and DSH, with reusable Python flows.",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",

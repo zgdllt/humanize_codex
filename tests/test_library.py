@@ -7,9 +7,10 @@ import subprocess
 import time
 
 import pytest
+from flow_fixtures import FLOW, prepare
 from hmz.sdk import Hmz, fakes
 
-from humanize_codex.jobs import FLOW, Jobs, prepare
+from humanize_codex.jobs import Jobs
 from humanize_codex.library import Library
 from humanize_codex.store import atomic_json
 

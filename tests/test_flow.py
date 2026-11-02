@@ -1,147 +1,81 @@
-"""Exercise real Humanize control flow without model calls or user filesystem changes."""
+"""Official algorithms run unchanged; the native bridge preserves skills and permissions."""
 
 import asyncio
 import json
 
 import pytest
-from hmz.flows import OutputSchemaError
-from hmz.sdk import fakes
+from hmz.flows import PermissionKind
+from hmz.sdk import Hmz, fakes
 
-from humanize_codex.jobs import FLOW
-
-PLAN = {
-    "steps": ["Implement then verify"],
-    "acceptance": ["The real check passes"],
-    "rationale": "Minimal implementation",
-}
-REPORT = {"summary": "正在执行已授权的工作", "next_step": "等待独立审查"}
+from humanize_codex.jobs import execution_budget
+from humanize_codex.native import entry_file
 
 
-def verdict(action, notes="Concrete feedback"):
-    return {"action": action, "notes": notes, "evidence": ["test_feature.py:12; check exit 0"]}
-
-
-def run(tmp_path, actor, reviewer, planner=None, **params):
-    return asyncio.run(
-        fakes.run_fake(
-            f"{FLOW}:dynamic_workflow",
-            "Implement the requested feature",
-            agents={
-                "actor": actor,
-                "reviewer": reviewer,
-                "planner": planner or PLAN,
-            },
-            params={"artifacts": str(tmp_path), **params},
-        )
-    )
-
-
-def test_adapts_plan_keeps_actor_and_refreshes_reviews(tmp_path):
-    actor = fakes.FakeAgentDriver("codex", reply="Implemented and checked")
+def test_official_rlar_has_no_plugin_round_cap():
+    actor = fakes.FakeAgentDriver("codex", reply="Implemented")
     reviewer = fakes.FakeAgentDriver(
         "codex",
-        reply=[
-            verdict("replan", "Change the approach"),
-            verdict("fix", "Fix the boundary"),
-            verdict("complete", "Verified the real implementation"),
-        ],
+        reply=[{"done": False, "notes": "Continue"}] * 101
+        + [{"done": True, "notes": "Verified the implementation"}],
     )
-    planner = fakes.FakeAgentDriver("codex", reply=PLAN)
-    result = run(tmp_path, actor, reviewer, planner)
-    assert result["status"] == "complete"
-    assert result["round"] == 3
-    assert len(actor.sessions) == 1
-    assert len(reviewer.sessions) == 3
-    assert len(planner.sessions) == 2
-    assert "Fix the boundary" in actor.prompts[-1]
-    assert json.loads((tmp_path / "review-3.json").read_text())["action"] == "complete"
-
-
-def test_required_human_input_is_blocked_not_completed(tmp_path):
-    result = run(tmp_path, "Need an unprovided decision", verdict("blocked", "Need user input"))
-    assert result["status"] == "blocked"
-    assert result["round"] == 1
-
-
-def test_round_limit_does_not_claim_completion(tmp_path):
-    result = run(tmp_path, "Not complete", verdict("fix"), max_rounds=2)
-    assert result["status"] == "round_limit"
-    assert result["round"] == 2
-    assert result["action"] == "fix"
-
-
-def test_empty_review_evidence_is_rejected(tmp_path):
-    with pytest.raises(OutputSchemaError):
-        run(tmp_path, "Done", {"action": "complete", "notes": "Trust me", "evidence": []})
-
-
-def test_review_mode_skips_unnecessary_initial_planning(tmp_path):
-    planner = fakes.FakeAgentDriver("codex", reply=PLAN)
-    result = run(tmp_path, "Done", verdict("complete"), planner, mode="review")
-    assert result["status"] == "complete"
-    assert not planner.sessions
-
-
-def test_read_only_variant_runs_on_real_engine(tmp_path):
     result = asyncio.run(
         fakes.run_fake(
-            f"{FLOW}:read_only_workflow",
-            "Explain this repository",
-            agents={
-                "planner": PLAN,
-                "actor": "Explanation",
-                "reviewer": verdict("complete"),
-            },
-            params={"artifacts": str(tmp_path)},
+            "rlar",
+            "Implement the task",
+            agents={"actor": actor, "reviewer": reviewer},
         )
     )
-    assert result["status"] == "complete"
+    assert result == "Verified the implementation"
+    assert len(actor.sessions) == 1
+    assert len(reviewer.sessions) == 102
 
 
-def test_journal_resume_preserves_progress_and_original_goal(tmp_path):
-    journal = tmp_path / "journal.jsonl"
-    args = {
-        "flow": f"{FLOW}:dynamic_workflow",
-        "task": "Original goal",
-        "journal": journal,
-        "params": {"max_rounds": 1},
-    }
-    first = asyncio.run(
-        fakes.run_fake(
-            **args,
-            agents={
-                "planner": PLAN,
-                "actor": "Attempt",
-                "reviewer": verdict("fix"),
-            },
-        )
+@pytest.mark.parametrize("read_only", [False, True])
+def test_native_bridge_runs_real_official_rlar_with_its_skills(tmp_path, read_only, monkeypatch):
+    monkeypatch.setenv("HUMANIZE_CODEX_CHILD", "0")
+    bridge = entry_file(tmp_path, "rlar", read_only=read_only)
+    ref = f"{bridge}:rlar"
+    declared = Hmz(tmp_path).flows.declared(ref)
+    assert {r.name for r in declared.agents} == {"actor", "reviewer"}
+    assert (bridge / "skills/review-notes/SKILL.md").is_file()
+    if read_only:
+        assert all(r.permission.local == PermissionKind.READ for r in declared.agents)
+    run = Hmz(tmp_path).run(
+        ref,
+        "Implement the task",
+        agents={
+            "actor": fakes.FakeAgentDriver("codex", reply="Done"),
+            "reviewer": fakes.FakeAgentDriver("codex", reply={"done": True, "notes": "Verified"}),
+        },
+        budget=execution_budget(),
+        backup=[],
     )
-    actor = fakes.FakeAgentDriver("codex", reply="Now verified")
-    planner = fakes.FakeAgentDriver("codex", reply=PLAN)
-    second = asyncio.run(
-        fakes.run_fake(
-            **args,
-            resume=True,
-            agents={
-                "planner": planner,
-                "actor": actor,
-                "reviewer": verdict("complete"),
-            },
-        )
-    )
-    assert first["status"] == "round_limit"
-    assert second["status"] == "complete" and second["round"] == 2
-    assert not planner.sessions
-    assert "Concrete feedback" in actor.prompts[0]
-    with pytest.raises(ValueError, match="different task"):
-        asyncio.run(
-            fakes.run_fake(
-                **{**args, "task": "Changed goal"},
-                resume=True,
-                agents={
-                    "planner": PLAN,
-                    "actor": "x",
-                    "reviewer": verdict("complete"),
-                },
-            )
-        )
+    assert run.run() == "Verified"
+    assert json.loads((tmp_path / "flow-result.json").read_text()) == {"value": "Verified"}
+
+
+def test_readonly_bridge_keeps_denied_permissions_and_automatic_roles(tmp_path, monkeypatch):
+    monkeypatch.setenv("HUMANIZE_CODEX_CHILD", "0")
+    source = tmp_path / "sealed.py"
+    source.write_text("""from hmz.flows import *
+class Sealed(Agent):
+    _permission = Permission(local=PermissionKind.NONE, user=PermissionKind.NONE,
+                             system=PermissionKind.NONE, online=PermissionKind.NONE)
+class Agents(AgentCollection):
+    worker: Sealed
+@flow(agents=Agents, envs=EnvCollection, params=FlowParams)
+async def sealed(task, *, agents, envs, params, ctx):
+    return "done"
+""")
+    restricted = tmp_path / "restricted"
+    restricted.mkdir()
+    bridge = entry_file(restricted, f"{source}:sealed", read_only=True)
+    role = Hmz(tmp_path).flows.declared(f"{bridge}:sealed").agents[0]
+    for scope in ("local", "user", "system", "online"):
+        assert getattr(role.permission, scope) == PermissionKind.NONE
+    chat = tmp_path / "chat"
+    chat.mkdir()
+    bridge = entry_file(chat, "chat", read_only=True)
+    original = Hmz(tmp_path).flows.declared("chat")
+    adapted = Hmz(tmp_path).flows.declared(f"{bridge}:chat")
+    assert [(r.name, r.auto) for r in adapted.agents] == [(r.name, r.auto) for r in original.agents]

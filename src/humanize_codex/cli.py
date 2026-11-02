@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 
-from .jobs import DEFAULT_AGENT, Jobs, doctor, prepare
+from .jobs import DEFAULT_AGENT, DEFAULT_FLOW, Jobs, doctor, prepare
 from .library import Library
 from .store import TERMINAL, data_root
 
@@ -35,6 +35,10 @@ def main() -> None:
         item.add_argument("job_id")
         if name in {"steer", "resume"}:
             item.add_argument("text", nargs="?", default="")
+        if name == "resume":
+            item.add_argument("--duration", type=float)
+            item.add_argument("--output-tokens", type=int)
+            item.add_argument("--cost", type=float)
         if name == "wait":
             item.add_argument("--seconds", type=float, default=30)
         if name == "save":
@@ -49,15 +53,18 @@ def main() -> None:
     item.add_argument("name")
     item.add_argument("--workspace", required=True)
     item.add_argument("--task-file", required=True)
-    item.add_argument("--duration", type=float, default=1800)
+    item.add_argument("--duration", type=float)
+    item.add_argument("--output-tokens", type=int)
+    item.add_argument("--cost", type=float)
     item.add_argument("--allow-candidate", action="store_true")
     item = sub.add_parser("run")
     item.add_argument("--workspace", required=True)
     item.add_argument("--task-file", required=True)
-    item.add_argument("--mode", choices=["dynamic", "review"], default="dynamic")
+    item.add_argument("--flow", default=DEFAULT_FLOW)
     item.add_argument("--agent", default=DEFAULT_AGENT)
-    item.add_argument("--max-rounds", type=int, default=6)
-    item.add_argument("--duration", type=float, default=1800)
+    item.add_argument("--duration", type=float)
+    item.add_argument("--output-tokens", type=int)
+    item.add_argument("--cost", type=float)
     item.add_argument("--read-only", action="store_true")
     item.add_argument("--role", action="append", default=[], metavar="ROLE=SPEC")
     item.add_argument("--flow-file", default="")
@@ -126,10 +133,11 @@ def main() -> None:
             prepare(
                 args.workspace,
                 Path(args.task_file).read_text(encoding="utf-8"),
-                args.mode,
-                args.agent,
-                args.max_rounds,
-                args.duration,
+                flow=args.flow,
+                agent=args.agent,
+                duration_seconds=args.duration,
+                output_tokens=args.output_tokens,
+                cost_usd=args.cost,
                 read_only=args.read_only,
                 agents=dict(spec.split("=", 1) for spec in args.role),
                 flow_file=args.flow_file,
@@ -155,7 +163,9 @@ def main() -> None:
             args.name,
             args.workspace,
             Path(args.task_file).read_text(),
-            args.duration,
+            duration_seconds=args.duration,
+            output_tokens=args.output_tokens,
+            cost_usd=args.cost,
             allow_candidate=args.allow_candidate,
         )
     elif args.command == "open":
@@ -197,7 +207,13 @@ def main() -> None:
     elif args.command == "wait":
         result = jobs.wait(args.job_id, args.seconds)
     elif args.command == "resume":
-        result = jobs.resume(args.job_id, args.text)
+        result = jobs.resume(
+            args.job_id,
+            args.text,
+            duration_seconds=args.duration,
+            output_tokens=args.output_tokens,
+            cost_usd=args.cost,
+        )
     elif args.command == "events":
         result = jobs.events(args.job_id)
     else:

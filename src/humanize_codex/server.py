@@ -9,13 +9,13 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from .jobs import DEFAULT_AGENT, Jobs, doctor, prepare
+from .jobs import DEFAULT_AGENT, DEFAULT_FLOW, Jobs, doctor, prepare
 from .library import Library
 from .store import TERMINAL, data_root
 
 mcp = FastMCP(
     "Humanfia Humanize",
-    instructions="Use bounded Humanize workflows when useful for the user's task, without "
+    instructions="Use Humanize workflows when useful for the user's task, without "
     "requiring the user to name the plugin. Prefer direct execution for simple tasks. "
     "Select or author the control structure appropriate to the task. A started job is not "
     "a completed task: monitor until a terminal state and report verification evidence. "
@@ -31,37 +31,26 @@ def humanize_doctor(workspace: str | None = None) -> dict[str, Any]:
 
 @mcp.tool(annotations={"readOnlyHint": True})
 def humanize_catalog() -> dict[str, Any]:
-    """Describe arbitrary Python flow support, builtin templates and curation gates."""
+    """List upstream flows and describe direct Python flow execution."""
+    from hmz.sdk import Hmz
+
     return {
-        "dynamic": "Plan → implement → fresh review → repair/replan/complete/blocked",
-        "review": "Implement → fresh review → repair/replan/complete/blocked",
-        "default_agent": "Automatic: follow the local Codex CLI configuration/default",
-        "harnesses": ["codex", "dsh"],
-        "custom": "flow_file + entrypoint + flow_params: arbitrary Python sequence, loop, "
-        "branch, parallel and nested flows with declared role names",
-        "builtin_role_overrides": ["planner", "actor", "reviewer"],
-        "custom_manager_roles": ["humanize_verifier"],
-        "flow_library": "Reviewed successes enter the candidate pool; curated reuse requires "
-        "applicability assessment and at least two passing structural test cases",
-        "live_status": "The native Humanize app or a named tmux TUI session shows "
-        "actual flow/agent/tool events",
-        "custom_verification": "Unfinished custom output ends as needs_work. Choose a new bounded "
-        "run from the evidence; resume is supported only when the authored flow declares it",
-        "defaults": {"max_rounds": 6, "duration_seconds": 1800, "output_tokens": 50000},
-        "statuses": [
-            "starting",
-            "running",
-            "cleaning_up",
-            "complete",
-            "blocked",
-            "round_limit",
-            "budget_exceeded",
-            "cancelled",
-            "failed",
-            "lost",
-            "needs_work",
+        "default_flow": DEFAULT_FLOW,
+        "flows": [
+            {"ref": item.name, "source": item.whose, "description": item.about}
+            for item in Hmz().flows.all()
         ],
-        "custom_flows": "Use the humanize-author-flow skill for the full upstream Python flow API",
+        "default_agent": "Automatic: follow local Codex configuration/default",
+        "harnesses": ["codex", "dsh"],
+        "custom": "flow_file + entrypoint + flow_params, or any upstream SDK flow reference",
+        "defaults": {"duration_seconds": None, "output_tokens": None, "cost_usd": None},
+        "budget": "Unlimited unless the caller sets a limit; explicit limits use SDK semantics",
+        "completion": "complete means the selected flow returned normally; assess its result "
+        "against the task. Custom flow results may report blocked or needs_work.",
+        "flow_library": "Independent review evidence admits custom sources to candidates; "
+        "curation still requires applicability assessment and structural tests",
+        "live_status": "Official Humanize app or named tmux TUI",
+        "custom_flows": "Use humanize-author-flow to adapt official flows or author Python",
     }
 
 
@@ -69,12 +58,11 @@ def humanize_catalog() -> dict[str, Any]:
 def humanize_run(
     workspace: str,
     task: str,
-    mode: str = "dynamic",
+    flow: str = DEFAULT_FLOW,
     agent: str = DEFAULT_AGENT,
-    max_rounds: int = 6,
-    duration_seconds: float = 1800,
+    duration_seconds: float | None = None,
     cost_usd: float | None = None,
-    output_tokens: int = 50000,
+    output_tokens: int | None = None,
     read_only: bool = False,
     agents: dict[str, str] | None = None,
     flow_file: str = "",
@@ -82,36 +70,29 @@ def humanize_run(
     entrypoint: str = "",
     flow_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Start a bounded Codex/DSH workflow in an explicitly selected absolute workspace.
+    """Run an official or authored Humanize flow, with no budget limits unless specified.
 
-    Calls the real Humanize engine in a durable worker. Only one workflow may write or
-    inspect this workspace at a time. Use read_only for review/analysis-only tasks.
-    Leave agent empty to follow local Codex; explicit models never silently fall back.
-    Without entrypoint, use the builtin adaptive planner/actor/reviewer template. With flow_file and
-    entrypoint, run an authored Python flow with its own roles, parameters and control
-    structure; independent verification is added by the manager. The native app/TUI opens
-    automatically;
-    share its workspace/epic or tmux session and attach command with the user.
-    A custom flow that fails verification ends as needs_work; choose the next bounded run
-    from its evidence. Resume requires an explicitly resumable authored flow.
-    Completed reviewed flows enter the local candidate pool; success alone is not curation.
-    Monitor the returned job_id; launching is not proof of completion.
+    flow defaults to upstream rlar; other SDK flow references are accepted. flow_file and
+    entrypoint select trusted local Python with its own roles and control structure. No
+    plugin planner, verifier or round limit is added. Assign agents by the flow's roles.
+    read_only restricts local agent permissions. Native app/TUI visibility opens automatically;
+    share its workspace/epic or tmux session and attach command with the user. Monitor the job
+    until terminal state, and assess the returned output as evidence for the user's task.
     """
     request = prepare(
         workspace,
         task,
-        mode,
-        agent,
-        max_rounds,
-        duration_seconds,
-        cost_usd,
-        output_tokens,
-        read_only,
-        agents,
-        flow_file,
-        retain_flow,
-        entrypoint,
-        flow_params,
+        flow=flow,
+        agent=agent,
+        duration_seconds=duration_seconds,
+        cost_usd=cost_usd,
+        output_tokens=output_tokens,
+        read_only=read_only,
+        agents=agents,
+        flow_file=flow_file,
+        retain_flow=retain_flow,
+        entrypoint=entrypoint,
+        flow_params=flow_params,
     )
     return Jobs().start(request)
 
@@ -154,8 +135,8 @@ async def humanize_wait(
         if time.monotonic() - notified >= 5:
             progress = state["progress"]
             message = progress.get("stage", state["status"])
-            if state["request"].get("entrypoint"):
-                message += " · " + state["request"]["entrypoint"]
+            if state["request"].get("flow") or state["request"].get("entrypoint"):
+                message += " · " + (state["request"].get("entrypoint") or state["request"]["flow"])
             else:
                 message += f" · round {progress.get('round', 0)}"
             await ctx.report_progress(
@@ -255,15 +236,24 @@ def humanize_reuse_flow(
     name: str,
     workspace: str,
     task: str,
-    duration_seconds: float = 1800,
-    output_tokens: int = 50000,
+    duration_seconds: float | None = None,
+    output_tokens: int | None = None,
     agents: dict[str, str] | None = None,
     flow_params: dict[str, Any] | None = None,
     allow_candidate: bool = False,
+    cost_usd: float | None = None,
 ) -> dict[str, Any]:
-    """Reuse retained code, mode, permissions and role assignments with a new task and budget."""
+    """Reuse retained source and roles; leave limits unset for an unlimited new run."""
     return Jobs().reuse(
-        name, workspace, task, duration_seconds, output_tokens, agents, flow_params, allow_candidate
+        name,
+        workspace,
+        task,
+        duration_seconds,
+        output_tokens,
+        agents,
+        flow_params,
+        allow_candidate,
+        cost_usd,
     )
 
 
@@ -315,6 +305,18 @@ def humanize_cancel(job_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def humanize_resume(job_id: str, guidance: str = "") -> dict[str, Any]:
-    """Resume an unfinished journal as a new bounded run, with optional new user guidance."""
-    return Jobs().resume(job_id, guidance)
+def humanize_resume(
+    job_id: str,
+    guidance: str = "",
+    duration_seconds: float | None = None,
+    output_tokens: int | None = None,
+    cost_usd: float | None = None,
+) -> dict[str, Any]:
+    """Resume a stopped journal with optional new limits; omitted limits are unlimited."""
+    return Jobs().resume(
+        job_id,
+        guidance,
+        duration_seconds=duration_seconds,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
+    )

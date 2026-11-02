@@ -333,7 +333,7 @@ wheels = [
 
 [[package]]
 name = "humanfia-humanize-codex"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "hmz", extra = ["dsh"] },

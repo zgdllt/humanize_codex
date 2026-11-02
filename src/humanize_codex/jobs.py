@@ -28,8 +28,7 @@ from .store import (
 )
 
 DEFAULT_AGENT = ""
-FLOW = Path(__file__).with_name("flow.py")
-ROLES = ("planner", "actor", "reviewer")
+DEFAULT_FLOW = "rlar"
 
 
 def validate_agent(spec: str) -> str:
@@ -82,23 +81,30 @@ def doctor(workspace: str | None = None) -> dict[str, Any]:
     }
 
 
-def _bounded_number(value: float | int, name: str, maximum: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a finite positive number")
-    if not math.isfinite(value) or not 0 < value <= maximum:
-        raise ValueError(f"{name} must be greater than zero and at most {maximum}")
-    return float(value)
+def execution_budget(duration=None, cost=None, output_tokens=None) -> dict[str, Any]:
+    """Use the SDK budget contract; omitted limits mean an unlimited run."""
+    from hmz.flows import Budget
+
+    values = {
+        k: v
+        for k, v in {"duration": duration, "cost": cost, "output_tokens": output_tokens}.items()
+        if v is not None
+    }
+    budget = Budget.model_validate(values or {"cost": math.inf})
+    result = json.loads(budget.model_dump_json(exclude_none=True))
+    if budget.duration is not None:
+        result["duration"] = budget.duration.total_seconds()
+    return result
 
 
 def prepare(
     workspace: str,
     task: str,
-    mode: str = "dynamic",
+    flow: str = DEFAULT_FLOW,
     agent: str = DEFAULT_AGENT,
-    max_rounds: int = 6,
-    duration_seconds: float = 1800,
+    duration_seconds: float | None = None,
     cost_usd: float | None = None,
-    output_tokens: int = 50000,
+    output_tokens: int | None = None,
     read_only: bool = False,
     agents: dict[str, str] | None = None,
     flow_file: str = "",
@@ -114,22 +120,15 @@ def prepare(
         raise ValueError("workspace must be an existing absolute directory")
     if not isinstance(task, str) or not task.strip() or len(task) > 100000:
         raise ValueError("task must contain 1–100000 characters")
-    if mode not in {"dynamic", "review"}:
-        raise ValueError("mode must be dynamic or review")
+    if not isinstance(flow, str) or not flow.strip():
+        raise ValueError("flow must be a Humanize flow reference")
     validate_agent(agent)
     if agents is not None and (
         not isinstance(agents, dict)
         or len(agents) > 32
-        or any(
-            not isinstance(role, str)
-            or not role.isidentifier()
-            or (not entrypoint and not flow_file and role not in ROLES)
-            for role in agents
-        )
+        or any(not isinstance(role, str) or not role.isidentifier() for role in agents)
     ):
-        raise ValueError(
-            "Use declared role names (up to 32); builtin roles are planner/actor/reviewer"
-        )
+        raise ValueError("Use the selected flow's declared role names (up to 32)")
     for spec in (agents or {}).values():
         validate_agent(spec)
     if flow_file:
@@ -143,27 +142,14 @@ def prepare(
         raise ValueError("A custom entrypoint requires a trusted flow_file and Python identifier")
     if flow_params is not None and not isinstance(flow_params, dict):
         raise ValueError("flow_params must be an object")
-    if (
-        isinstance(max_rounds, bool)
-        or not isinstance(max_rounds, int)
-        or not 1 <= max_rounds <= 100
-    ):
-        raise ValueError("max_rounds must be an integer between 1 and 100")
-    duration = _bounded_number(duration_seconds, "duration_seconds", 86400)
-    _bounded_number(output_tokens, "output_tokens", 10000000)
-    if not isinstance(output_tokens, int):
-        raise ValueError("output_tokens must be an integer")
     if not isinstance(read_only, bool):
         raise ValueError("read_only must be a boolean")
-    budget: dict[str, Any] = {"duration": duration, "output_tokens": output_tokens}
-    if cost_usd is not None:
-        budget["cost"] = _bounded_number(cost_usd, "cost_usd", 100000)
+    budget = execution_budget(duration_seconds, cost_usd, output_tokens)
     return {
         "workspace": str(path.resolve()),
         "task": task,
-        "mode": mode,
+        "flow": flow,
         "agent": agent,
-        "max_rounds": max_rounds,
         "budget": budget,
         "read_only": read_only,
         "agents": agents or {},
@@ -199,7 +185,11 @@ class Jobs:
             "progress": progress,
             "retention_class": retention,
             "elapsed_seconds": round(elapsed, 1),
-            "remaining_seconds": round(max(0, request["budget"]["duration"] - elapsed), 1),
+            "remaining_seconds": (
+                round(max(0, request["budget"]["duration"] - elapsed), 1)
+                if request["budget"].get("duration") is not None
+                else None
+            ),
             "revision": f"{state['status']}:{progress.get('revision', 0)}",
             "artifacts": str(path),
             **({"trace": self.trace(job_id, state)} if include_trace else {}),
@@ -237,8 +227,11 @@ class Jobs:
             raise ValueError("A Humanize worker cannot launch another Humanize workflow")
         # Resolve actual declared roles/backends in the worker, before any model turn.
         # The parent cannot infer omitted/automatic roles of arbitrary Python collections.
-        source = Path(request.get("flow_file") or FLOW)
-        source_bytes = snapshot(source, request.get("entrypoint", ""))
+        source_bytes = (
+            snapshot(Path(request["flow_file"]), request.get("entrypoint", ""))
+            if request.get("flow_file")
+            else None
+        )
         with locked(self.root), workspace_locked(self.root, request["workspace"]):
             for current in self.list(request["workspace"]):
                 if current["status"] not in TERMINAL:
@@ -249,7 +242,8 @@ class Jobs:
             path = self.root / "runs" / job_id
             path.mkdir(parents=True, mode=0o700)
             now = time.time()
-            (path / "workflow.py").write_bytes(source_bytes)
+            if source_bytes is not None:
+                (path / "workflow.py").write_bytes(source_bytes)
             atomic_json(path / "request.json", request)
             atomic_json(
                 path / "state.json",
@@ -308,8 +302,12 @@ class Jobs:
                 raise ValueError(f"Job is already {state['status']}")
             if kind == "steer" and state["status"] == "cleaning_up":
                 raise ValueError("Job is cleaning up; steering can no longer reach its agents")
-            if role and (role not in state.get("agents", {}) or role == "humanize_verifier"):
-                raise ValueError("Select an active task role, not the independent verifier")
+            if role and (
+                role not in state.get("agents", {})
+                or "flow" not in state["request"]
+                and role == "humanize_verifier"
+            ):
+                raise ValueError("Select an active task role")
             atomic_json(
                 path / "inbox" / f"{time.time_ns()}-{ticket}.json",
                 {
@@ -340,20 +338,33 @@ class Jobs:
                 return state
             time.sleep(min(0.2, max(0, deadline - time.monotonic())))
 
-    def resume(self, job_id: str, guidance: str = "") -> dict[str, Any]:
+    def resume(
+        self,
+        job_id: str,
+        guidance: str = "",
+        *,
+        duration_seconds: float | None = None,
+        output_tokens: int | None = None,
+        cost_usd: float | None = None,
+    ) -> dict[str, Any]:
         state = self.status(job_id)
         if state["status"] not in TERMINAL or state["status"] == "complete":
             raise ValueError("Only an unfinished, stopped job can be resumed")
         if not state.get("epic"):
             raise ValueError("This job has no Humanize journal to resume")
-        if state["request"].get("entrypoint") and not state.get("flow", {}).get("resumable"):
+        if (state["request"].get("entrypoint") or "flow" in state["request"]) and not state.get(
+            "flow", {}
+        ).get("resumable"):
             raise ValueError(
                 "This authored flow does not support resume; reassess before a new run"
             )
         if len(guidance) > 50000:
             raise ValueError("guidance is too long")
         request = dict(state["request"])
-        request["flow_file"] = str(job_path(self.root, job_id) / "workflow.py")
+        request["budget"] = execution_budget(duration_seconds, cost_usd, output_tokens)
+        source = job_path(self.root, job_id) / "workflow.py"
+        if source.is_file():
+            request["flow_file"] = str(source)
         request.update(resume_epic=state["epic"], resume_of=job_id, guidance=guidance)
         return self.start(request)
 
@@ -362,11 +373,12 @@ class Jobs:
         name: str,
         workspace: str,
         task: str,
-        duration_seconds: float = 1800,
-        output_tokens: int = 50000,
+        duration_seconds: float | None = None,
+        output_tokens: int | None = None,
         agents: dict[str, str] | None = None,
         flow_params: dict[str, Any] | None = None,
         allow_candidate: bool = False,
+        cost_usd: float | None = None,
     ) -> dict[str, Any]:
         profile = Library(self.root).get(name)
         if profile["curation"]["status"] == "rejected":
@@ -377,21 +389,26 @@ class Jobs:
         request = prepare(
             workspace,
             task,
-            mode=settings["mode"],
-            max_rounds=settings["max_rounds"],
             read_only=settings["read_only"],
             agents={
                 k: v
                 for k, v in {**settings["agents"], **(agents or {})}.items()
-                if k != "humanize_observer"
-                and (settings.get("entrypoint") or k != "humanize_verifier")
+                if "mode" not in settings
+                or (
+                    k != "humanize_observer"
+                    and (settings.get("entrypoint") or k != "humanize_verifier")
+                )
             },
             duration_seconds=duration_seconds,
             output_tokens=output_tokens,
+            cost_usd=cost_usd,
             flow_file=str(Library(self.root).source(name)),
             entrypoint=settings.get("entrypoint", ""),
             flow_params=flow_params,
         )
+        if "mode" in settings:
+            request.pop("flow")
+            request.update(mode=settings["mode"], max_rounds=settings["max_rounds"])
         request["reused_flow"] = name
         return self.start(request)
 

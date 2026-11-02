@@ -6,9 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from flow_fixtures import prepare
 from hmz.sdk import Hmz, fakes
 
-from humanize_codex.jobs import Jobs, prepare
+from humanize_codex.jobs import Jobs
 from humanize_codex.store import TERMINAL, read_json
 from humanize_codex.worker import work
 

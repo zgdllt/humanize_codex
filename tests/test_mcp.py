@@ -23,7 +23,15 @@ def test_protocol_and_tools(tmp_path):
         )
         async with stdio_client(params) as streams, ClientSession(*streams) as client:
             await client.initialize()
-            names = {tool.name for tool in (await client.list_tools()).tools}
+            declared = (await client.list_tools()).tools
+            names = {tool.name for tool in declared}
+            run_schema = next(t.inputSchema for t in declared if t.name == "humanize_run")[
+                "properties"
+            ]
+            assert run_schema["flow"]["default"] == "rlar"
+            assert run_schema["duration_seconds"]["default"] is None
+            assert run_schema["output_tokens"]["default"] is None
+            assert "mode" not in run_schema and "max_rounds" not in run_schema
             assert {
                 "humanize_run",
                 "humanize_wait",
@@ -104,7 +112,7 @@ def test_wait_sends_protocol_progress_without_exposing_task(tmp_path):
                 progress_callback=progress,
             )
             assert not response.isError
-            assert messages and messages[0] == (2, None, "acting · round 1")
+            assert messages and messages[0] == (2, None, "acting · rlar")
             assert "PRIVATE_TASK" not in str(messages)
 
     asyncio.run(exercise())

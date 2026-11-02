@@ -1,4 +1,4 @@
-"""One independent, bounded Humanize SDK run with durable progress and control receipts."""
+"""One Humanize SDK run with durable progress and control receipts."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from typing import Any
 
 from .binary import select_codex
 from .compat import guard_codex_startup
-from .jobs import ROLES
 from .library import retain_completed
 from .models import default_agent
 from .store import TERMINAL, atomic_json, data_root, job_path, read_json, workspace_locked
@@ -79,11 +78,15 @@ def _work(job_id: str) -> None:
                 active.pop(key, None)
             update(active_agents=list(active.values()))
             if (
-                request.get("entrypoint")
+                (request.get("entrypoint") or "flow" in request)
                 and kind in {"begins", "ends"}
-                and role != "humanize_verifier"
+                and ("flow" in request or role != "humanize_verifier")
             ):
-                running = [x["role"] for x in active.values() if x["role"] != "humanize_verifier"]
+                running = [
+                    x["role"]
+                    for x in active.values()
+                    if "flow" in request or x["role"] != "humanize_verifier"
+                ]
                 atomic_json(
                     path / "progress.json",
                     {
@@ -115,8 +118,10 @@ def _work(job_id: str) -> None:
             else:
                 guidance.append(item["text"])
                 atomic_json(path / "guidance.json", guidance)
-                delivery = "available_to_flow" if request.get("entrypoint") else "next_turn"
-                desired = item.get("role") or ("" if request.get("entrypoint") else "actor")
+                delivery = "available_to_flow"
+                desired = item.get("role") or (
+                    "actor" if "actor" in state.get("agents", {}) else "agent"
+                )
                 with guard:
                     candidates = [
                         session
@@ -140,14 +145,32 @@ def _work(job_id: str) -> None:
     try:
         chosen = "read_only_workflow" if request["read_only"] else "dynamic_workflow"
         source = path / "workflow.py"
-        roles = list(ROLES)
+        roles = ["planner", "actor", "reviewer"]
         params = {
-            "mode": request["mode"],
-            "max_rounds": request["max_rounds"],
+            "mode": request.get("mode", "dynamic"),
+            "max_rounds": request.get("max_rounds", 6),
             "artifacts": str(path),
             "guidance": request.get("guidance", ""),
         }
-        if request.get("entrypoint"):
+        if "flow" in request:
+            reference = (
+                str(source) + (":" + request["entrypoint"] if request.get("entrypoint") else "")
+                if request.get("flow_file")
+                else request["flow"]
+            )
+            declared = Hmz(request["workspace"]).flows.declared(reference)
+            roles = [role.name for role in declared.agents if not role.auto]
+            params = request.get("flow_params", {})
+            declared.params.model_validate(params)
+            update(
+                flow={
+                    "name": declared.name,
+                    "ref": declared.ref,
+                    "resumable": declared.resumable,
+                    "roles": roles,
+                }
+            )
+        elif request.get("entrypoint"):
             from .custom import RESERVED, make_envelope
 
             source, info = make_envelope(path, request["entrypoint"], request["read_only"])
@@ -168,6 +191,10 @@ def _work(job_id: str) -> None:
         else:
             declared = Hmz(request["workspace"]).flows.declared(f"{source}:{chosen}")
             roles = [role.name for role in declared.agents if not role.auto]
+        if "flow" not in request:
+            reference = f"{source}:{chosen}"
+        if set(request.get("agents", {})) - set(roles):
+            raise ValueError("Agent assignments contain roles not declared by this flow")
         assignments = {
             role: request.get("agents", {}).get(role) or request["agent"] for role in roles
         }
@@ -196,11 +223,20 @@ def _work(job_id: str) -> None:
             from .native import NativeRun
 
             run = NativeRun(
-                request["workspace"], path, f"{source}:{chosen}", request["task"], **options
+                request["workspace"],
+                path,
+                reference,
+                request["task"],
+                read_only=request["read_only"] if "flow" in request else False,
+                **options,
             )
         else:
             # Finish handles created by older plugin versions, which used a local SDK run.
-            run = Hmz(request["workspace"]).run(f"{source}:{chosen}", request["task"], **options)
+            if "flow" in request and request["read_only"]:
+                from .native import entry_file
+
+                reference = f"{entry_file(path, reference, read_only=True)}:{declared.name}"
+            run = Hmz(request["workspace"]).run(reference, request["task"], **options)
         run.watch(watch)
         run.opened(opened)
         run.noticed(lambda text: event("notice", text=text))
@@ -215,7 +251,8 @@ def _work(job_id: str) -> None:
             control(run)
             if cancel.is_set():
                 run.stop()
-            if time.monotonic() - began > request["budget"]["duration"] + 5:
+            duration = request["budget"].get("duration")
+            if duration is not None and time.monotonic() - began > duration + 5:
                 forced_budget = True
                 run.close()
             usage = run.usage
@@ -242,7 +279,7 @@ def _work(job_id: str) -> None:
         }:
             update(status=run.result["status"], result=run.result)
         else:
-            update(status="failed", error="The flow returned no recognized completion result")
+            update(status="complete", result={"value": run.result})
         usage = run.usage
         update(
             epic=str(run.epic) if run.epic else None,

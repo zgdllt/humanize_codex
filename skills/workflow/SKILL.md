@@ -1,46 +1,45 @@
 ---
 name: humanize-workflow
-description: Use adaptive Python workflows when a task benefits from staged work, evidence-driven branching, bounded iteration, independent verification or parallel agents. Select proactively; handle simple tasks directly.
+description: Use official or authored Humanize workflows when staged work, branching, iteration or parallel agents help. Select proactively; handle simple tasks directly.
 ---
 
-# Choose the right amount of workflow
+# Choose a flow for the task
 
-Use Humanize when coordination provides a concrete benefit. The user need not name this
-plugin. Handle a simple edit, answer or single check directly. For larger work, select the
-control structure from the task: sequence, bounded loop, conditional branch, parallel fanout/
-join, nested flows, or combinations. Do not force every task into an actor/reviewer loop.
+Use Humanize when coordination helps the task. The user need not name this plugin.
+Direct execution is preferred when faster and cheaper.
 
-1. Inspect the objective, applicable AGENTS.md, existing changes and completion evidence.
-   Check runtime readiness when unknown. Keep model, permission and budget choices explicit.
-2. Search `humanize_library` for applicable curated flows. Read use_when/avoid_when and code;
-   success count alone is not a ranking. Candidates are hidden by default. Inspect them with
-   include_candidates=true when assessing a potentially useful recipe.
-3. Reuse a suitable curated flow, or author one through `humanize-author-flow`. Call
-   `humanize_run` with flow_file, entrypoint, agents keyed by the flow's own declared roles,
-   and flow_params for its inputs. The two built-in dynamic/review modes remain conveniences.
-   They are templates, not the definition of dynamic workflow. For a simple candidate trial,
-   allow_candidate=true is an explicit choice, not a claim that it has been curated.
-4. The manager adds independent verification and native app/TUI visibility to generic flows.
-   The authored Python decides its own internal sequence, loops, branches and concurrency.
-   A verifier finding unfinished work produces needs_work; the manager does not secretly
-   replace the authored structure with a repair loop. Decide the next bounded action from
-   the evidence. No unapproved scope expansion or overlapping workspace writers.
-5. humanize_run opens Humanize app on desktop or starts its official TUI in a named tmux
-   session on SSH/terminal hosts. Immediately tell the user the returned app workspace/epic,
-   or the tmux session and attach_command (switch_command inside tmux). The native UI owns
-   live visibility of flows, agents, tool calls and costs. Do not maintain a dashboard or
-   add a narration observer. humanize_open reopens an existing viewer without rerunning work.
-   Wait at most 60 seconds per call and report required decisions and the final result.
-6. Steer a generic flow by naming its task role. Untargeted guidance is stored for the flow;
-   arbitrary Python must explicitly read it if needed. Check delivery receipts. Cancellation
-   is complete only at terminal state; do not automatically resume a user-cancelled task.
-7. Complete plus independent review evidence admits a flow to the private candidate pool.
-   For useful recipes, assess reusability and limitations, test relevant control paths using
-   humanize_validate_flow, then humanize_curate_flow. Promotion requires at least two passing
-   scenarios for the exact code/entry and an applicability assessment. Reject brittle,
-   task-bound or redundant candidates; more successful runs alone do not make a good flow.
+1. Read the objective, applicable AGENTS.md, existing changes and completion evidence.
+   Check runtime readiness when unknown. Follow the user's model and permission choices.
+2. Inspect `humanize_catalog` for upstream flows and `humanize_library` for curated custom
+   sources. Choose by behavior and applicability. The default `flow="rlar"` is the official
+   actor/reviewer flow; `ralph_loop` and `stateful_ralph` deliberately continue until stopped.
+   Do not force every task into a review loop. Adapt official source or author a new flow
+   when a different sequence, branch, loop, parallel join or nested structure fits better.
+3. Call `humanize_run(flow=..., agents=..., flow_params=...)`, or provide flow_file and
+   entrypoint for a trusted local Python flow. Assign models by the selected flow's roles.
+   There is no plugin planner, extra verifier or max_rounds parameter.
+4. Omit duration_seconds, output_tokens and cost_usd for an unlimited run. Set a limit only
+   when the user requests it or a task-specific budget already applies. Do not invent caps
+   or simulate "unlimited" with a large finite number. A deliberately endless upstream loop
+   keeps running without limits until cancelled. read_only restricts local agent permissions.
+5. The official app/TUI opens automatically. Immediately share the returned app workspace/
+   epic or tmux session and attach_command (switch_command inside tmux). Use the native UI
+   for flow, session, tool and usage visibility; do not add a dashboard or narration agent.
+   Wait at most 60 seconds per tool call; this is polling, not a workflow runtime limit.
+   Report stage outcomes, meaningful changes, required decisions and final evidence in chat.
+6. Steering can target an active task role; check receipts. Untargeted guidance is stored
+   and submitted to actor/agent when a session is available. Cancellation is complete at
+   terminal state. Do not automatically resume a user-cancelled run. Resume requires the
+   selected flow to support journals and accepts new optional limits; omitted limits are
+   unlimited. Old saved requests keep their original flow/envelope structure on recovery.
+7. `complete` means the selected flow returned normally. Read the result and verify the
+   user's requested outcome; a Python return alone is not independent task acceptance.
+   Custom results can explicitly report complete, blocked or needs_work. No extra model
+   verification is imposed by the plugin.
+8. Custom flows with actual independent review evidence can enter the private candidate
+   pool. Official flows remain available by reference. Curate only useful recipes: assess
+   scope/limitations and test relevant paths before promotion. More successful runs alone
+   do not establish reuse value. Do not turn retention into extra work on every task.
 
-Keep the original goal, user changes, protected processes and authorization boundaries.
-Respect task-specific budgets. Sub-workflows cannot recursively launch this manager.
-
-Only use a workflow when it offers concrete coordination value; direct work is preferred when faster and cheaper.
+Preserve the original goal, user changes and existing authorization boundaries. Native
+sub-flows are supported; recursively starting another plugin-managed job is not.

@@ -80,14 +80,17 @@ def supervise(job_id: str) -> None:
         native = request.get("native")
         if native:
             tree.add(native["pid"], native["created"])
-        deadline = time.monotonic() + request["budget"]["duration"]
+        duration = request["budget"].get("duration")
+        deadline = time.monotonic() + duration if duration is not None else None
         reason, stop_at = "", 0.0
         forced, supervisor_error = False, ""
         try:
             while runner.poll() is None:
                 tree.capture()
                 cancelled = _cancel_requested(path)
-                if not reason and (cancelled or time.monotonic() >= deadline):
+                if not reason and (
+                    cancelled or deadline is not None and time.monotonic() >= deadline
+                ):
                     reason = "cancelled" if cancelled else "budget_exceeded"
                     stop_at = time.monotonic()
                     runner.send_signal(signal.SIGTERM)
