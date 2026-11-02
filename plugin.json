@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "humanfia-humanize",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Native Humanize app and tmux TUI workflows for Codex and DSH, with reusable Python flows.",
   "license": "Apache-2.0",
   "extensions": {

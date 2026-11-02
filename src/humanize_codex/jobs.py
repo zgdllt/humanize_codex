@@ -61,7 +61,7 @@ def doctor(workspace: str | None = None) -> dict[str, Any]:
         dsh = {"sdk_version": importlib.metadata.version("deepseek-harness-sdk")}
         dsh["native_auth_ready"] = native_ready(workspace or Path.cwd())
     except importlib.metadata.PackageNotFoundError:
-        dsh = {"sdk_version": None, "error": "Install the pinned hmz[dsh] dependencies"}
+        dsh = {"sdk_version": None, "error": "Install the hmz[dsh] dependencies"}
     from .viewer import app_path
 
     return {

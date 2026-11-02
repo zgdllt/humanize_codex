@@ -1,4 +1,4 @@
-"""Launch the pinned plugin environment without modifying the user's Python environment."""
+"""Resolve the latest stable Humanize in a cached, isolated tool environment."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import os
 import shutil
 import sys
 from pathlib import Path
+
+from latest_humanize import latest_version
 
 
 def main() -> None:
@@ -20,16 +22,21 @@ def main() -> None:
     )
     data.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HUMANIZE_CODEX_DATA", str(data.resolve()))
-    os.environ["UV_PROJECT_ENVIRONMENT"] = str(data / "runtime")
     args = [
         uv,
+        "tool",
         "run",
-        "--project",
+        "--isolated",
+        "--from",
         str(root),
         "--python",
         "3.14",
-        "--frozen",
-        "--no-dev",
+        "--with",
+        f"hmz[dsh]=={latest_version()}",
+        "--refresh-package",
+        "hmz",
+        "--prerelease",
+        "if-necessary-or-explicit",
         "humanize-codex",
         *sys.argv[1:],
     ]

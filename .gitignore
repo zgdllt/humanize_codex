@@ -15,3 +15,5 @@ output/
 .dsh/
 .credentials*
 .DS_Store
+compatibility-report.json
+compatibility-tests.xml

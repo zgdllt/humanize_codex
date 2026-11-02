@@ -1,0 +1,81 @@
+name: Humanize latest compatibility
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [humanize-release]
+  push:
+    branches: [main]
+    paths:
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/humanize-latest.yml'
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/humanize-latest.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: humanize-latest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  latest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install 3.14
+      - name: Install tmux for native TUI coverage
+        shell: bash
+        run: |
+          if ! command -v tmux >/dev/null; then
+            if [ "$RUNNER_OS" = Linux ]; then
+              sudo apt-get update
+              sudo apt-get install -y tmux
+            else
+              brew install tmux
+            fi
+          fi
+      - name: Identify the current upstream release
+        id: upstream
+        run: python3 scripts/latest_humanize.py
+      - name: Require that release instead of accepting an older compatible fallback
+        env:
+          HMZ_LATEST_VERSION: ${{ steps.upstream.outputs.version }}
+        run: uv lock --upgrade-package "hmz==$HMZ_LATEST_VERSION"
+      - run: uv sync --frozen --python 3.14
+      - name: Record tested dependency versions
+        env:
+          HMZ_LATEST_VERSION: ${{ steps.upstream.outputs.version }}
+        run: uv run --frozen python scripts/compatibility_report.py
+      - name: Exercise plugin, native Host, journal and tmux integration
+        run: uv run --frozen pytest -q --junitxml=compatibility-tests.xml
+      - name: Retain compatibility diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: humanize-latest-${{ runner.os }}
+          path: |
+            compatibility-report.json
+            compatibility-tests.xml
+            uv.lock

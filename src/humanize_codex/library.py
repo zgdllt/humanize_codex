@@ -299,7 +299,7 @@ class Library:
             atomic_json(temporary / "flow.json", exported)
             (temporary / "README.md").write_text(
                 f"# {name}\n\n{profile['description']}\n\n"
-                "Self-contained Humanize source bundle (hmz 0.2.1).\n"
+                "Self-contained Humanize source bundle.\n"
                 f"Select `:{name}`; original entry: {entry}. Role settings are in flow.json.\n"
                 "Local successes are observations, not a cross-task benchmark.\n"
                 "No task prompts, review transcripts or credentials are exported.\n"

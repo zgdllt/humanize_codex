@@ -4,6 +4,26 @@
 按需编写和运行顺序、循环、分支、并行及嵌套 Python flow，支持 Codex / DeepSeek Harness（DSH）。
 社区适配，非 Humanfia 或 OpenAI 官方插件。Apache-2.0。
 
+## v0.4.1：跟随 Humanize latest
+
+插件启动时从 PyPI 读取 `hmz` 当前默认发布版本，精确安装该版本及 DSH extra；
+不会因兼容性问题自动退回旧版。2026-11-02 的最新稳定版为 0.2.2。
+运行环境由 `uv tool run --isolated` 缓存，新版不会改动正在执行的 flow 或全局 hmz 安装。
+已连接的 MCP 进程在重新连接后使用新版；启动时需要访问 PyPI。
+`uv.lock` 保留可复现的开发基线，分发启动器不再受这个锁文件约束。
+
+[Humanize latest compatibility](https://github.com/zgdllt/humanize_codex/actions/workflows/humanize-latest.yml)
+每 6 小时在 Linux/macOS 检查 PyPI 最新版，也支持相关代码的 push/PR、手动运行，
+以及 `repository_dispatch` 的 `humanize-release` 事件。它要求实际解析版本等于最新版本，
+测试 MCP 启动、原生 Host、根 journal 恢复、取消、tmux TUI 和既有 flow 行为。
+每次保留版本报告、JUnit 结果和实际锁文件，供依赖变更后的定位与修复使用。
+常规 Checks 继续测试锁定的开发基线。CI 不调用付费在线模型。
+
+```sh
+gh workflow run humanize-latest.yml --repo zgdllt/humanize_codex
+gh api repos/zgdllt/humanize_codex/dispatches -f event_type=humanize-release
+```
+
 ## v0.4.0：直接使用 Humanize app / TUI
 
 插件不再提供浏览器看板，也不再添加用于摘要播报的 observer 模型回合。
@@ -26,7 +46,7 @@ switch_command: tmux switch-client -t humanize-8a6b31b6f321
 从另一个终端用 attach_command；按 Ctrl-b、d 分离，任务继续。
 SSH 的命令需在运行 flow 的那台主机执行。
 
-固定的 hmz 0.2.1 用裸命令 `hmz` 打开 TUI，没有 `hmz tui` 子命令。
+当前 hmz 用裸命令 `hmz` 打开 TUI，没有 `hmz tui` 子命令。
 插件通过上游 `Humanize(link=...)` 将同一个官方 TUI 连接到本任务的独占会话，
 避免裸命令连接到另一个默认会话。无需复制或维护一套界面。
 
@@ -36,7 +56,7 @@ SSH 的命令需在运行 flow 的那台主机执行。
 ## 安装
 
 需要 macOS/Linux、`uv` 和可用的后端登录；桌面模式需要安装 Humanize app，
-终端/SSH 模式需要 `tmux`。首次启动下载 Python 3.14 与锁定依赖。
+终端/SSH 模式需要 `tmux`。首次启动下载 Python 3.14 与当前最新的 Humanize 依赖。
 
 ```sh
 codex plugin marketplace add zgdllt/humanize_codex
@@ -114,7 +134,7 @@ max_rounds 只控制内置循环；自定义循环由作者的参数决定。
 
 SDK 的原生 Host 不在消息里返回 Python 结果。插件以一层很薄的入口保存结果，同时沿用
 原 flow 的根 journal 上下文，避免恢复时因新的日志目录改变而丢失状态。
-这使用固定 hmz 0.2.1 的 FlowImpl.fn；Codex SQLite 初始化竞争仍通过启动握手的窄适配处理。
+这使用上游 FlowImpl.fn；Codex SQLite 初始化竞争仍通过启动握手的窄适配处理。
 
 工具：humanize_run/status/list/wait/events/steer/cancel/resume/open。
 `humanize_open(job_id)` 重开界面，不重新执行 flow。TUI host 已结束时打开官方 /epics 历史菜单；
@@ -172,6 +192,6 @@ python3 scripts/package.py
 [验证记录](VALIDATION.md) 区分这些测试与实际在线模型运行。
 
 上游：[humanfia/humanize](https://github.com/humanfia/humanize)，Apache-2.0。
-固定 PyPI hmz[dsh]==0.2.1，桌面/TUI 行为以该版本为准。
+运行时跟随 PyPI `hmz[dsh]` 最新稳定版，开发基线及实测版本见验证记录。
 [原生 CLI 参考](https://docs.humanfia.ai/humanize/reference/cli)、
 [共享 Host 参考](https://docs.humanfia.ai/humanize/reference/daemon)。

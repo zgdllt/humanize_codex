@@ -1,8 +1,24 @@
 # 验证记录
 
-日期：2026-11-02。版本：0.4.0。
+日期：2026-11-02。当前版本：0.4.1。
 
-## 本次原生界面与运行链路
+## v0.4.1 依赖更新
+
+开发基线从 hmz[dsh] 0.2.1 升级到 PyPI 最新稳定版 0.2.2。
+实际分发启动器通过隔离的 uv tool 环境加载 hmz 0.2.2、DSH SDK 0.1.5rc1，
+doctor 返回插件 0.4.1 和 Humanize 0.2.2。最新版本约束独立于项目 uv.lock，
+不改动全局 hmz 或正在执行的 flow 的环境。
+
+本机 macOS 在 hmz 0.2.2 上完整测试 120 项通过，包含实际分发入口的 MCP 握手、
+原生 Host、恢复/取消和真实 tmux TUI；ruff 检查、格式检查、wheel/sdist 和 marketplace 打包通过。
+MCP 首次检查遇到一次 PyPI TLS EOF，单项重跑及随后完整测试均通过。
+
+latest CI 在 Linux/macOS 强制安装 PyPI 当时发布的精确版本，记录并核对实际版本，
+执行完整测试，并安装 tmux 运行原生 TUI 集成路径。
+另保留使用 uv.lock 的常规 CI，便于区分上游变化与本仓库回归。
+本次没有新增在线模型调用；下方 v0.4.0 在线烟雾测试的限制仍保留。
+
+## v0.4.0 原生界面与运行链路（历史记录）
 
 依赖固定 hmz[dsh]==0.2.1。本机 macOS 已安装 Humanize app 0.2.1 和 tmux。
 插件移除独立浏览器看板、humanize_dashboard 工具和用于播报的 observer。

@@ -61,7 +61,7 @@ def entry_file(path: Path, source: str) -> Path:
         "agents=target.expected_agents, envs=target.expected_envs, "
         "params=target.expected_params, resumable=declared.resumable)\n"
         "async def codex_workflow(task, *, agents, envs, params, ctx):\n"
-        # hmz 0.2.1 FlowImpl.fn forwards the validated root context unchanged. A nested
+        # FlowImpl.fn forwards the validated root context unchanged. A nested
         # target(...) call would reset its journal when a resumed job's artifacts move.
         "    value = await target.fn(task, agents=agents, envs=envs, params=params, ctx=ctx)\n"
         f"    atomic_json(Path({str(path / 'flow-result.json')!r}), {{'value': value}})\n"
